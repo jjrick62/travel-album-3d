@@ -17,10 +17,10 @@ let isEditing = false;
 const $ = (id) => document.getElementById(id);
 
 // ===== 初始化 =====
-async function init() { console.log("[Init] app.js v2 启动, citiesData 加载中...");
+async function init() { 
   // 加载城市数据
   const resp = await fetch('data/cities.json');
-  citiesData = await resp.json(); console.log('[Init] citiesData 加载完成:', citiesData.length, '条');
+  citiesData = await resp.json();
 
   // 初始化数据库
   const meta = await initDB();
@@ -87,7 +87,7 @@ function createSearch(inputId, resultsId, onSelect) {
     document.body.appendChild(results);
   }
 
-  input.addEventListener('input', () => { console.log('[Search] input:', input.value);
+  input.addEventListener('input', () => {
     const q = input.value.trim();
     if (!q) { results.classList.remove('active'); return; }
 
@@ -109,7 +109,7 @@ function createSearch(inputId, resultsId, onSelect) {
 
     results.innerHTML = '';
     if (matched.length === 0) { results.classList.remove('active'); return; }
-    results.classList.add('active'); console.log('[Search] showing', matched.length, 'results, first:', matched[0]?.name);
+    results.classList.add('active');
     // fixed 定位贴到输入框正下方
     const rect = input.getBoundingClientRect();
     results.style.top = (rect.bottom + 4) + 'px';
