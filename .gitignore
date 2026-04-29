@@ -1,0 +1,15 @@
+# 系统文件
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# IDE
+.vscode/
+.idea/
+
+# 临时脚本
+data/map/fetch_*.js
+
+# 旧版地图数据（已迁移到 china_*.geojson）
+data/map/admin1.geojson
+data/map/admin1_world.json

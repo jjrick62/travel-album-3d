@@ -1,0 +1,133 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>我的旅行 · 地球相册</title>
+  <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+  <!-- Three.js 背景 -->
+  <div id="globe-container"></div>
+
+  <!-- 顶部栏 -->
+  <header id="header">
+    <div class="header-left">
+      <h1>我的旅行</h1>
+      <span id="stats" class="stats"></span>
+    </div>
+    <div class="header-right">
+      <button id="btn-add" class="btn-add">+</button>
+      <button id="btn-settings" class="btn-triangle">&#9660;</button>
+      <div id="settings-dropdown" class="dropdown hidden">
+        <div class="dropdown-section">
+          <div class="dropdown-label">常住地</div>
+          <div class="search-select">
+            <input type="text" id="home-search" placeholder="搜索中国城市..." autocomplete="off" aria-label="搜索常住地">
+            <div id="home-search-results" class="search-results"></div>
+          </div>
+          <div id="home-display" class="home-display hidden">
+            当前：<span id="home-name"></span>
+          </div>
+        </div>
+        <div class="dropdown-divider"></div>
+        <button id="btn-export" class="dropdown-btn">导出数据</button>
+        <button id="btn-reset-view" class="dropdown-btn">重置视角</button>
+      </div>
+    </div>
+  </header>
+
+  <!-- 添加地点浮层 -->
+  <div id="add-modal" class="modal hidden">
+    <div class="modal-backdrop"></div>
+    <div class="modal-content">
+      <div class="modal-header">
+        <h2>添加地点</h2>
+        <button class="btn-close">&times;</button>
+      </div>
+      <div class="modal-body">
+        <div class="form-group">
+          <label for="city-search">地点</label>
+          <div class="search-select">
+            <input type="text" id="city-search" placeholder="搜索中国城市..." autocomplete="off">
+            <div id="city-search-results" class="search-results"></div>
+          </div>
+        </div>
+        <div class="form-group">
+          <label for="visit-date">访问日期</label>
+          <input type="date" id="visit-date">
+        </div>
+        <div class="form-group">
+          <label>评分</label>
+          <div class="star-input" id="star-input">
+            <span data-value="1">☆</span>
+            <span data-value="2">☆</span>
+            <span data-value="3">☆</span>
+            <span data-value="4">☆</span>
+            <span data-value="5">☆</span>
+          </div>
+        </div>
+        <div class="form-group">
+          <label for="place-notes">感想</label>
+          <textarea id="place-notes" rows="3" placeholder="写点感想..."></textarea>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn-secondary" id="btn-cancel-add">取消</button>
+        <button class="btn-primary" id="btn-save-add">保存</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- 地点详情卡片 -->
+  <div id="detail-card" class="detail-card hidden">
+    <div class="detail-header">
+      <h2 id="detail-name"></h2>
+      <button id="btn-close-detail" class="btn-close">&times;</button>
+    </div>
+    <div class="detail-body">
+      <div class="detail-meta">
+        <span id="detail-fullname" class="detail-fullname"></span>
+        <span id="detail-date" class="detail-date"></span>
+      </div>
+      <div class="detail-stars" id="detail-stars"></div>
+      <div class="detail-photos" id="detail-photos">
+        <div class="photo-grid" id="photo-grid"></div>
+        <button id="btn-add-photo" class="btn-text">+ 添加照片</button>
+        <input type="file" id="photo-input" accept="image/*" multiple hidden>
+      </div>
+      <div class="detail-notes" id="detail-notes"></div>
+    </div>
+    <div class="detail-footer">
+      <button id="btn-edit-place" class="btn-secondary">编辑</button>
+      <button id="btn-delete-place" class="btn-outline">删除</button>
+    </div>
+  </div>
+
+  <!-- 照片预览浮层 -->
+  <div id="photo-viewer" class="modal hidden">
+    <div class="modal-backdrop"></div>
+    <div class="photo-viewer-content">
+      <button class="btn-close btn-close-light">&times;</button>
+      <img id="photo-viewer-img" src="" alt="照片">
+      <div style="margin-top:10px;">
+        <input type="text" id="photo-caption" placeholder="添加说明文字..." autocomplete="off"
+          style="width:100%;background:rgba(255,255,255,0.04);border:1px solid #333;border-radius:6px;padding:10px 14px;color:#ccc;font-size:14px;outline:none;">
+      </div>
+    </div>
+  </div>
+
+  <script type="importmap">
+  {
+    "imports": {
+      "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
+      "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"
+    }
+  }
+  </script>
+
+  <script type="module" src="js/data.js"></script>
+  <script type="module" src="js/earth.js"></script>
+  <script type="module" src="js/app.js"></script>
+</body>
+</html>
