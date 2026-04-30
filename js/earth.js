@@ -23,6 +23,10 @@ export class Earth {
     this._refHeight = 1080;
     this._placeDots = [];
     this._placeFills = [];
+    this._placeSprites = [];
+    this._backMeshes = [];
+    this._frameCallbacks = [];
+    this._focusedPlaceId = null;
 
     this._initScene();
     this._initControls();
@@ -162,9 +166,21 @@ export class Earth {
 
     const mesh = new THREE.Points(geo, mat);
     mesh.material.transparent = true;
+    mesh.renderOrder = 1;
     this[propName] = mesh;
     this.earthGroup.add(mesh);
     this._sizedPoints.push({ mesh, baseSize: style.size });
+
+    // 背面副本：同一几何体，depthFunc 反转，仅遮挡球后面的粒子可见
+    const backMat = mat.clone();
+    backMat.depthFunc = THREE.GreaterDepth;
+    const backMesh = new THREE.Points(geo, backMat);
+    backMesh.renderOrder = 0;
+    backMesh.visible = true;
+    this.earthGroup.add(backMesh);
+    this._backMeshes.push({ front: mesh, back: backMesh, factor: 0.35 });
+    this._sizedPoints.push({ mesh: backMesh, baseSize: style.size });
+
     if (!skipFade) {
       mesh.material.opacity = 0;
       this.fadingItems.push({ mesh, target: style.opacity });
@@ -180,6 +196,12 @@ export class Earth {
         this[key] = null;
       }
     }
+    // 清理背面副本
+    for (const bm of this._backMeshes) {
+      this.earthGroup.remove(bm.back);
+      bm.back.material.dispose();
+    }
+    this._backMeshes = [];
   }
 
   // 缩放图层辅助：平滑淡入淡出，不跳变
@@ -262,6 +284,7 @@ export class Earth {
         opacity: 0.35,
       }, 'cityPoints', true, 2);
       if (this._onDataReady) this._onDataReady();
+      this._createHomeFill();
       console.log(`[Earth] cities loaded`);
     } catch (err) {
       console.warn('Cities load failed:', err);
@@ -282,6 +305,7 @@ export class Earth {
         size: 0.75,
         opacity: 0.25,
       }, 'districtPoints', true, 4);
+      this._createHomeFill();
       console.log(`[Earth] districts loaded`);
     } catch (err) {
       console.warn('Districts load failed:', err);
@@ -297,6 +321,50 @@ export class Earth {
       radius * Math.cos(phi),
       radius * Math.sin(phi) * Math.sin(theta)
     );
+  }
+
+  // ===== 3D 到屏幕投影 =====
+  _worldPos(lat, lng, radius) {
+    const local = this._latLngToVec3(lat, lng, radius || this.earthRadius);
+    return local.applyMatrix4(this.earthGroup.matrixWorld);
+  }
+
+  isFrontFacing(lat, lng) {
+    const pos = this._worldPos(lat, lng, 1.0);
+    const normal = pos.clone().normalize();
+    const viewDir = this.camera.position.clone().normalize();
+    return normal.dot(viewDir) > 0;
+  }
+
+  getFacing(lat, lng) {
+    const pos = this._worldPos(lat, lng, 1.0);
+    const normal = pos.clone().normalize();
+    const viewDir = this.camera.position.clone().normalize();
+    return normal.dot(viewDir);
+  }
+
+  projectToScreen(lat, lng, radius) {
+    const world = this._worldPos(lat, lng, radius || this.earthRadius * 1.02);
+    const screen = world.clone().project(this.camera);
+    return {
+      x: (screen.x * 0.5 + 0.5) * window.innerWidth,
+      y: (-screen.y * 0.5 + 0.5) * window.innerHeight,
+      z: screen.z,
+      visible: screen.z < 1,
+    };
+  }
+
+  getEarthCenterScreen() {
+    const center = new THREE.Vector3(0, 0, 0).project(this.camera);
+    return {
+      x: (center.x * 0.5 + 0.5) * window.innerWidth,
+      y: (-center.y * 0.5 + 0.5) * window.innerHeight,
+      visible: center.z < 1,
+    };
+  }
+
+  onFrame(cb) {
+    this._frameCallbacks.push(cb);
   }
 
   // ===== 星空 =====
@@ -324,12 +392,10 @@ export class Earth {
   }
 
   // ===== 设置常住地 =====
-  setHome(lat, lng) {
-    if (this.homeMarker) {
-      this.earthGroup.remove(this.homeMarker);
-    }
-    const pos = this._latLngToVec3(lat, lng, this.earthRadius * 1.02);
+  setHome(lat, lng, name) {
+    if (this.homeMarker) this.earthGroup.remove(this.homeMarker);
 
+    const pos = this._latLngToVec3(lat, lng, this.earthRadius * 1.02);
     const sprite = new THREE.Sprite(new THREE.SpriteMaterial({
       map: this._glowTex,
       transparent: true,
@@ -339,9 +405,39 @@ export class Earth {
       opacity: 0.9,
     }));
     sprite.position.copy(pos);
-    sprite.scale.setScalar(0.16);
+    sprite.scale.setScalar(0.04);
     this.earthGroup.add(sprite);
     this.homeMarker = sprite;
+
+    // 存储信息供延迟创建填区（GeoJSON 可能尚未加载完）
+    this._homeName = name || null;
+    this._homeLat = lat;
+    this._homeLng = lng;
+    this._createHomeFill();
+  }
+
+  _createHomeFill() {
+    if (!this._homeName) return;
+    if (this._homeFill) { this.earthGroup.remove(this._homeFill); this._homeFill = null; }
+    let feature = null;
+    if (this._districtsGeoJSON) {
+      feature = this._districtsGeoJSON.features.find(f => f.properties && f.properties.name === this._homeName);
+    }
+    if (!feature && this._citiesGeoJSON) {
+      feature = this._citiesGeoJSON.features.find(f => f.properties && f.properties.name === this._homeName);
+    }
+    if (!feature) return;
+    const pts = this._fillFeature(feature, 0.01);
+    if (!pts || pts.length === 0) return;
+    const geo = new THREE.BufferGeometry();
+    geo.setAttribute('position', new THREE.Float32BufferAttribute(pts, 3));
+    const mat = new THREE.PointsMaterial({
+      color: 0xffffff, size: 1.2, transparent: true, opacity: 0.35,
+      blending: THREE.AdditiveBlending, depthWrite: false, sizeAttenuation: false,
+    });
+    this._homeFill = new THREE.Points(geo, mat);
+    this.earthGroup.add(this._homeFill);
+    this._sizedPoints.push({ mesh: this._homeFill, baseSize: 1.2 });
   }
 
   // ===== 多边形内点判断（射线法） =====
@@ -415,11 +511,14 @@ export class Earth {
       opacity: 0.6 + r / 5 * 0.4,
     }));
     dot.position.copy(dotPos);
-    dot.scale.setScalar(0.07 + r * 0.01);
+    const baseScale = 0.07 + r * 0.01;
+    dot.scale.setScalar(baseScale);
     dot.userData = { placeId: place.id };
     this.earthGroup.add(dot);
     if (!this._placeDots) this._placeDots = [];
     this._placeDots.push(dot);
+    if (!this._placeSprites) this._placeSprites = [];
+    this._placeSprites.push({ sprite: dot, base: baseScale });
 
     // 查找匹配的行政区特征，预生成填充粒子
     let fillMesh = null;
@@ -533,6 +632,7 @@ export class Earth {
     this.visitedClusters = [];
     this._placeDots = [];
     this._placeFills = [];
+    this._placeSprites = [];
     this.arcLines = [];
     this.clickMeshes = [];
   }
@@ -559,9 +659,7 @@ export class Earth {
     ).normalize().multiplyScalar(this.earthRadius * 1.01);
 
     const normal = p.clone().normalize();
-    const tangent = new THREE.Vector3(
-      Math.random() - 0.5, Math.random() - 0.5, Math.random() - 0.5
-    ).cross(normal).normalize();
+    const tangent = new THREE.Vector3(0, 1, 0).cross(normal).normalize();
 
     const segs = 6;
     const trail = [];
@@ -620,14 +718,99 @@ export class Earth {
       if (hits.length > 0) {
         const id = hits[0].object.userData.placeId;
         if (id && this.onPlaceClick) this.onPlaceClick(id);
+      } else if (this.onMissClick) {
+        this.onMissClick();
       }
     });
   }
 
+  // ===== 飞行聚焦到地点 =====
+  focusOnPlace(lat, lng, onArrive) {
+    const local = this._latLngToVec3(lat, lng, this.earthRadius * 1.01);
+    const world = local.clone().applyMatrix4(this.earthGroup.matrixWorld);
+    const radial = world.clone().normalize();
+    const camTarget = world;
+    const camPos = world.clone().add(radial.clone().multiplyScalar(0.55));
+
+    if (!this._savedMinDist) {
+      this._savedMinDist = this.controls.minDistance;
+    }
+    this.controls.minDistance = 0.15;
+
+    this._flyFromTarget = this.controls.target.clone();
+    this._flyToTarget = camTarget;
+    this._flyFromCam = this.camera.position.clone();
+    this._flyToCam = camPos;
+    this._flyStart = performance.now();
+    this._flyDuration = 1000;
+    this._flyOnArrive = onArrive || null;
+
+    // 暂停自转，聚焦期间地点不能转走
+    if (!this._flySavedRotating) {
+      this._flySavedRotating = this.rotating;
+      this.rotating = false;
+    }
+  }
+
+  zoomOutFromPlace(lat, lng) {
+    this._focusedPlaceId = null;
+    const local = this._latLngToVec3(lat, lng, this.earthRadius * 1.01);
+    const world = local.clone().applyMatrix4(this.earthGroup.matrixWorld);
+    const radial = world.clone().normalize();
+    // 镜头从地点沿径向往后拉远，地点保持画面正中
+    this._flyFromTarget = this.controls.target.clone();
+    this._flyToTarget = world;
+    this._flyFromCam = this.camera.position.clone();
+    this._flyToCam = world.clone().add(radial.clone().multiplyScalar(2.5));
+    this._flyStart = performance.now();
+    this._flyDuration = 1600;
+    this._flyOnArrive = () => {
+      if (this._flySavedRotating !== undefined) {
+        this.rotating = this._flySavedRotating;
+        this._flySavedRotating = undefined;
+      }
+    };
+    this.clearHighlight();
+    if (this._savedMinDist) {
+      this.controls.minDistance = this._savedMinDist;
+      this._savedMinDist = null;
+    }
+  }
+
+  flyToOverview() {
+    this._focusedPlaceId = null;
+    this._flyFromTarget = this.controls.target.clone();
+    this._flyToTarget = new THREE.Vector3(0, 0, 0);
+    this._flyFromCam = this.camera.position.clone();
+    // 保持当前角度，沿视线方向拉远
+    const dir = this.camera.position.clone().normalize();
+    this._flyToCam = dir.multiplyScalar(3.5);
+    this._flyStart = performance.now();
+    this._flyDuration = 1500;
+    this._flyOnArrive = () => {
+      // 回到总览后恢复自转
+      if (this._flySavedRotating !== undefined) {
+        this.rotating = this._flySavedRotating;
+        this._flySavedRotating = undefined;
+      }
+    };
+    this.clearHighlight();
+    if (this._savedMinDist) {
+      this.controls.minDistance = this._savedMinDist;
+      this._savedMinDist = null;
+    }
+  }
+
+  highlightFill(placeId) {
+    this._highlightedId = placeId;
+  }
+
+  clearHighlight() {
+    this._highlightedId = null;
+  }
+
   resetView() {
-    this.camera.position.set(0, 1.5, 3.5);
-    this.controls.target.set(0, 0, 0);
-    this.controls.update();
+    this.flyToOverview();
   }
 
   // ===== 启动 =====
@@ -658,17 +841,16 @@ export class Earth {
       }
     }
 
-    // 海岸线呼吸 —— 等淡入完成或超过 8 秒兜底
+    // 海岸线常亮 —— 等淡入完成后保持恒定
     if (this.coastlinePoints) {
       if (!this._breathStartTime && this.fadingItems.length === 0) {
         this._breathStartTime = performance.now();
       }
       if (!this._breathStartTime && performance.now() > 8000) {
-        this._breathStartTime = performance.now(); // 超时兜底
+        this._breathStartTime = performance.now();
       }
       if (this._breathStartTime) {
-        const breathe = 0.50 + 0.30 * Math.sin(performance.now() * 0.0008);
-        this.coastlinePoints.material.opacity = breathe;
+        this.coastlinePoints.material.opacity = 0.8;
       }
     }
 
@@ -679,10 +861,20 @@ export class Earth {
       this._ringPoints.material.opacity = ringBreath;
     }
 
-    // 常住地发光粒子脉冲
+    // 常住地发光粒子脉冲（大小锁定，不受缩放影响）
     if (this.homeMarker) {
+      const worldPos = this.homeMarker.position.clone().applyMatrix4(this.earthGroup.matrixWorld);
+      const dist = this.camera.position.distanceTo(worldPos);
+      const base = 0.06 * dist / 3.5;
       const pulse = 0.8 + 0.2 * Math.sin(performance.now() * 0.002);
-      this.homeMarker.scale.setScalar(0.16 * pulse);
+      this.homeMarker.scale.setScalar(base * pulse);
+    }
+
+    // 地点光点大小锁定，不受缩放影响
+    for (const ps of this._placeSprites) {
+      const worldPos = ps.sprite.position.clone().applyMatrix4(this.earthGroup.matrixWorld);
+      const dist = this.camera.position.distanceTo(worldPos);
+      ps.sprite.scale.setScalar(ps.base * dist / 3.5);
     }
 
     // zoom 级别控制边界显隐
@@ -721,11 +913,25 @@ export class Earth {
       this._applyZoomLayer(this.districtPoints, dist, 1.7, 0.4, '_distOpacity');
     }
 
-    // 深度遮挡球：只在县界级别激活，遮挡地球背面粒子
+    // 边界粒子呼吸（海岸线除外，不同层呼吸频率错开）
+    if (this._breathStartTime) {
+      const t = performance.now() * 0.001;
+      if (this.borderPoints)
+        this.borderPoints.material.opacity = (this._borderOpacity || 0) * (0.65 + 0.35 * Math.sin(t * 1.3));
+      if (this.admin1ChinaPoints)
+        this.admin1ChinaPoints.material.opacity = (this._chinaAdminOpacity || 0) * (0.65 + 0.35 * Math.sin(t * 1.1));
+      if (this.admin1ForeignPoints)
+        this.admin1ForeignPoints.material.opacity = (this._foreignAdminOpacity || 0) * (0.65 + 0.35 * Math.sin(t * 0.9));
+      if (this.cityPoints)
+        this.cityPoints.material.opacity = (this._cityOpacity || 0) * (0.65 + 0.35 * Math.sin(t * 1.0));
+      if (this.districtPoints)
+        this.districtPoints.material.opacity = (this._distOpacity || 0) * (0.65 + 0.35 * Math.sin(t * 1.2));
+    }
+
+    // 深度遮挡球：始终激活，区分地球正背面
     if (this._occluder) {
-      const t = Math.min(1, Math.max(0, (1.85 - dist) / (1.85 - 1.55)));
-      this._occluder.scale.setScalar(t);
-      this._occluder.material.depthWrite = t > 0.02;
+      this._occluder.scale.setScalar(1);
+      this._occluder.material.depthWrite = true;
     }
 
     // 地点填充粒子 —— 放大到对应行政级别才点亮
@@ -788,6 +994,56 @@ export class Earth {
         }
         this.meteors.splice(i, 1);
       }
+    }
+
+    // 飞行聚焦动画（ease-out）
+    if (this._flyStart) {
+      const elapsed = performance.now() - this._flyStart;
+      const t = Math.min(1, elapsed / this._flyDuration);
+      const ease = 1 - Math.pow(1 - t, 3); // ease-out cubic
+      this.controls.target.lerpVectors(this._flyFromTarget, this._flyToTarget, ease);
+      this.camera.position.lerpVectors(this._flyFromCam, this._flyToCam, ease);
+      if (t >= 1) {
+        this._flyStart = null;
+        if (this._flyOnArrive) {
+          const cb = this._flyOnArrive;
+          this._flyOnArrive = null;
+          cb();
+        }
+      }
+    }
+
+    // 高亮填区呼吸
+    if (this._highlightedId) {
+      for (const pf of this._placeFills) {
+        if (pf.mesh && pf.mesh.userData.placeId === this._highlightedId) {
+          const breathe = 0.3 + 0.45 * Math.sin(performance.now() * 0.003);
+          pf.mesh.material.opacity = Math.max(pf.mesh.material.opacity || 0, breathe);
+          break;
+        }
+      }
+    }
+
+    // 常住地填区呼吸（始终可见，缓慢呼吸）
+    if (this._homeFill) {
+      const hb = 0.25 + 0.2 * Math.sin(performance.now() * 0.0015);
+      this._homeFill.material.opacity = hb;
+    }
+
+    // 同步背面副本：始终可见，opacity 跟随正面
+    if (this._backMeshes.length > 0) {
+      for (const bm of this._backMeshes) {
+        bm.back.visible = true;
+        bm.back.material.opacity = bm.front.material.opacity * (bm.factor || 0.35);
+      }
+    }
+
+    // 更新矩阵，确保帧回调拿到当前帧的地球旋转
+    this.earthGroup.updateMatrixWorld();
+
+    // 帧回调（供外部同步 UI 覆盖层）
+    for (const cb of this._frameCallbacks) {
+      cb();
     }
 
     this.controls.update();

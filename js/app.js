@@ -31,6 +31,7 @@ async function init() {
   // 初始化地球
   earth = new Earth(document.getElementById('globe-container'));
   earth.onPlaceClick = (id) => showDetail(id);
+  earth.onMissClick = () => {}; // 改由全局处理
   earth._onDataReady = () => { refreshEarth(); };
 
   // 手机端摄像机初始拉远
@@ -58,12 +59,16 @@ async function init() {
     document.getElementById('home-name').textContent = homeLocation.name;
     document.getElementById('home-display').classList.remove('hidden');
   }
+
+  // 悬浮卡片：先同步，再注册每帧更新
+  syncPlaceCards();
+  earth.onFrame(() => updatePlaceCards());
 }
 
 // ===== 应用数据到地球 =====
 function applyEarthData() {
   if (homeLocation) {
-    earth.setHome(homeLocation.lat, homeLocation.lng);
+    earth.setHome(homeLocation.lat, homeLocation.lng, homeLocation.name);
   }
   for (const p of places) {
     earth.addPlace(p, '#ffffff', p.rating || 3);
@@ -82,6 +87,370 @@ function updateStats() {
   }
   const avg = (places.reduce((s, p) => s + (p.rating || 0), 0) / total).toFixed(1);
   document.getElementById('stats').textContent = `${total} 个地点 · ★ ${avg}`;
+}
+
+// ===== 地点悬浮卡片（屏幕空间） =====
+function createPlaceCard(place) {
+  const svg = document.getElementById('connector-lines');
+  const line = document.createElementNS('http://www.w3.org/2000/svg', 'line');
+  line.dataset.placeId = place.id;
+  svg.appendChild(line);
+
+  const stars = '★'.repeat(place.rating || 3) + '☆'.repeat(5 - (place.rating || 3));
+  const thumb = place.photos && place.photos.length > 0
+    ? `<img class="place-card-thumb" src="${place.photos[0].dataUrl}" alt="">` : '';
+  const card = document.createElement('div');
+  card.className = 'place-card';
+  card.dataset.placeId = place.id;
+  card.innerHTML = `<div class="place-card-name">${place.name}</div>
+    <div class="place-card-meta">${stars}</div>${thumb}`;
+  // 单击/双击逻辑
+  card.addEventListener('click', (e) => {
+    // 折叠代表卡片：先飞过去，再展开
+    if (card.classList.contains('place-card-stacked')) {
+      const ck = card.dataset.clusterKey;
+      earth._focusedPlaceId = place.id;
+      earth.highlightFill(place.id);
+      earth.focusOnPlace(place.lat, place.lng, () => {
+        if (ck && updatePlaceCards._clusters && updatePlaceCards._clusters[ck]) {
+          const st = updatePlaceCards._clusters[ck];
+          st.expanded = true;
+          clearTimeout(st._timer);
+          st._timer = setTimeout(() => { st.expanded = false; }, 5000);
+        }
+      });
+      return;
+    }
+
+    const now = Date.now();
+    if (card._lastTap && now - card._lastTap < 350) {
+      // 双击 → 直接进入编辑
+      card._lastTap = 0;
+      selectedPlaceId = place.id;
+      document.getElementById('detail-card').classList.add('hidden');
+      earth._focusedPlaceId = place.id;
+      earth.highlightFill(place.id);
+      earth.focusOnPlace(place.lat, place.lng, () => openEditModal(place));
+    } else {
+      card._lastTap = now;
+      setTimeout(() => {
+        if (card._lastTap !== now) return;
+        if (earth._focusedPlaceId === place.id) {
+          selectedPlaceId = place.id;
+          document.getElementById('detail-card').classList.add('hidden');
+          earth.focusOnPlace(place.lat, place.lng, () => openEditModal(place));
+        } else {
+          earth._focusedPlaceId = place.id;
+          earth.highlightFill(place.id);
+          earth.focusOnPlace(place.lat, place.lng);
+        }
+      }, 350);
+    }
+  });
+  document.getElementById('place-cards').appendChild(card);
+}
+
+function removeAllPlaceCards() {
+  document.getElementById('connector-lines').innerHTML = '';
+  document.getElementById('place-cards').innerHTML = '';
+}
+
+function syncPlaceCards() {
+  removeAllPlaceCards();
+  // 过滤：跳过父级行政区、跳过重复
+  const seen = new Set();
+  const visible = places.filter(p => {
+    if (seen.has(p.name)) return false;
+    const fn = p.fullName || '';
+    const isParent = places.some(other => other !== p && (other.fullName || '').startsWith(fn + '·'));
+    if (!isParent) seen.add(p.name);
+    return !isParent;
+  });
+  for (const p of visible) createPlaceCard(p);
+}
+
+function updatePlaceCards() {
+  const svg = document.getElementById('connector-lines');
+  const w = window.innerWidth, h = window.innerHeight;
+  svg.setAttribute('viewBox', `0 0 ${w} ${h}`);
+  const center = earth.getEarthCenterScreen();
+
+  if (!updatePlaceCards._cache) updatePlaceCards._cache = {};
+  if (!updatePlaceCards._clusters) updatePlaceCards._clusters = {};
+
+  // 第一遍：计算所有卡片屏幕坐标
+  const cardData = [];
+  for (const place of places) {
+    const line = svg.querySelector(`line[data-place-id="${place.id}"]`);
+    const card = document.querySelector(`#place-cards .place-card[data-place-id="${place.id}"]`);
+    if (!line || !card) continue;
+
+    const facing = earth.getFacing(place.lat, place.lng);
+    const pt = earth.projectToScreen(place.lat, place.lng, earth.earthRadius * 1.02);
+    if (!pt.visible) {
+      line.style.display = 'none'; card.style.display = 'none'; continue;
+    }
+
+    const scale = Math.max(0.2, Math.min(1, 1 + facing));
+    const off = 150 * scale;
+    const opacity = Math.max(0.05, 0.5 + facing * 0.5).toFixed(2);
+
+    const dx = pt.x - center.x;
+    const dy = pt.y - center.y;
+    const d = Math.sqrt(dx * dx + dy * dy);
+    const nx = d > 0.01 ? dx / d : 0;
+    const ny = d > 0.01 ? dy / d : 0;
+
+    let tx = pt.x + nx * off; // 目标位置
+    let ty = pt.y + ny * off;
+
+    const cache = updatePlaceCards._cache;
+    const key = place.id;
+    if (!cache[key]) cache[key] = { x: tx, y: ty };
+    // 平滑 + 吸附：到位后不再抖
+    cache[key].x += (tx - cache[key].x) * 0.15;
+    cache[key].y += (ty - cache[key].y) * 0.15;
+    if (Math.abs(cache[key].x - tx) < 0.6) cache[key].x = tx;
+    if (Math.abs(cache[key].y - ty) < 0.6) cache[key].y = ty;
+
+    const cx = cache[key].x, cy = cache[key].y;
+
+    cardData.push({ place, line, card, pt, cx, cy, sx: cx, sy: cy, scale, opacity, facing });
+  }
+
+  // 第二遍：距离聚类（滞回：120px 合入，已有群 180px 才拆）
+  if (!updatePlaceCards._lastCluster) updatePlaceCards._lastCluster = {}; // placeId → clusterTag
+  const joinThresh = 120, splitThresh = 180;
+  const clustered = new Set();
+  const clusters = [];
+  for (let i = 0; i < cardData.length; i++) {
+    if (clustered.has(i)) continue;
+    const group = [i];
+    clustered.add(i);
+    for (let j = i + 1; j < cardData.length; j++) {
+      if (clustered.has(j)) continue;
+      const a = cardData[i], b = cardData[j];
+      const dist = Math.sqrt((a.sx - b.sx) ** 2 + (a.sy - b.sy) ** 2);
+      const sameLast = updatePlaceCards._lastCluster[a.place.id]
+        && updatePlaceCards._lastCluster[a.place.id] === updatePlaceCards._lastCluster[b.place.id];
+      const threshold = sameLast ? splitThresh : joinThresh;
+      if (dist < threshold) { group.push(j); clustered.add(j); }
+    }
+    clusters.push(group);
+  }
+  // 更新每张卡片的集群标签
+  const newLast = {};
+  for (let ci = 0; ci < clusters.length; ci++) {
+    for (const idx of clusters[ci]) {
+      newLast[cardData[idx].place.id] = ci;
+    }
+  }
+  updatePlaceCards._lastCluster = newLast;
+
+  // 第三遍：渲染
+  for (const group of clusters) {
+    if (group.length === 1) {
+      // 单张卡片：正常渲染
+      const d = cardData[group[0]];
+      d.card.classList.remove('place-card-stacked');
+      d.card.dataset.clusterKey = '';
+      d.line.style.display = '';
+      d.line.setAttribute('x1', d.pt.x); d.line.setAttribute('y1', d.pt.y);
+      d.line.setAttribute('x2', d.cx); d.line.setAttribute('y2', d.cy);
+      d.line.style.opacity = d.opacity;
+      d.card.style.display = '';
+      d.card.style.left = d.cx + 'px';
+      d.card.style.top = d.cy + 'px';
+      d.card.style.transform = `translate(-50%, -100%) scale(${d.scale})`;
+      d.card.style.opacity = d.opacity;
+    } else {
+      // 多张卡片聚类
+      const clusterKey = group.map(i => cardData[i].place.id).sort().join(',');
+      // 状态跨帧保持：相同成员集复用之前的展开状态
+      if (!updatePlaceCards._memberState) updatePlaceCards._memberState = {};
+      const memberSet = group.map(i => cardData[i].place.id).sort().join(',');
+      const savedExpanded = updatePlaceCards._memberState[memberSet];
+      const state = updatePlaceCards._clusters[clusterKey] || { expanded: savedExpanded || false };
+      updatePlaceCards._clusters[clusterKey] = state;
+      updatePlaceCards._memberState[memberSet] = state.expanded;
+
+      // 质心
+      let sumX = 0, sumY = 0;
+      for (const idx of group) { sumX += cardData[idx].sx; sumY += cardData[idx].sy; }
+      const bx = sumX / group.length, by = sumY / group.length;
+
+      // 找代表：优先下级行政区，缓存在 state 上防闪动
+      let bestIdx = group[0], bestScore = -Infinity;
+      for (const idx of group) {
+        const d = cardData[idx];
+        const dist = (d.sx - bx) ** 2 + (d.sy - by) ** 2;
+        let lvl = 0;
+        const dots = ((d.place.fullName || '').match(/·/g) || []).length;
+        if (dots >= 2) lvl = 2; else if (dots === 1) lvl = 1;
+        const score = lvl * 10000 - dist;
+        if (score > bestScore) { bestScore = score; bestIdx = idx; }
+      }
+      // 锁：旧代表在群内且分差不悬殊则不换
+      if (state._repIdx !== undefined && group.includes(state._repIdx)) {
+        const d = cardData[state._repIdx];
+        const oldDist = (d.sx - bx) ** 2 + (d.sy - by) ** 2;
+        let oldLvl = 0;
+        const od = ((d.place.fullName || '').match(/·/g) || []).length;
+        if (od >= 2) oldLvl = 2; else if (od === 1) oldLvl = 1;
+        const oldScore = oldLvl * 10000 - oldDist;
+        if (bestScore - oldScore < 5000) bestIdx = state._repIdx; // 差距不到半级不换
+      }
+      state._repIdx = bestIdx;
+      const rep = cardData[bestIdx];
+
+      // 计算展开目标：沿各卡片原始方向径向散开
+      const spreadR = 140;
+      const targets = [];
+      for (const idx of group) {
+        const d = cardData[idx];
+        let dirX = d.cx - bx, dirY = d.cy - by;
+        const mag = Math.sqrt(dirX * dirX + dirY * dirY);
+        if (mag < 1) {
+          const ang = (targets.length / group.length) * Math.PI * 2;
+          dirX = Math.cos(ang); dirY = Math.sin(ang);
+        } else {
+          dirX /= mag; dirY /= mag;
+        }
+        targets.push({ idx, tx: bx + dirX * spreadR, ty: by + dirY * spreadR });
+      }
+
+      // 展开/折叠状态切换
+      const justExpanded = state.expanded && !state._wasExpanded;
+      const justCollapsed = !state.expanded && state._wasExpanded;
+      state._wasExpanded = state.expanded;
+
+      // 两阶段：先闪现到起点（无过渡），再设置终点（CSS过渡），标记动画中防止被稳态覆盖
+      if (justExpanded) {
+        state._animating = true;
+        for (const t of targets) {
+          const d = cardData[t.idx];
+          d.card.style.transition = 'none';
+          d.card.style.display = '';
+          d.card.style.left = bx + 'px';
+          d.card.style.top = by + 'px';
+          d.card.classList.remove('place-card-stacked');
+          d.card.dataset.clusterKey = '';
+          d.line.style.display = 'none';
+        }
+        // 下一帧读取布局后触发过渡
+        requestAnimationFrame(() => {
+          for (const idx of group) { cardData[idx].card.offsetHeight; }
+          for (const t of targets) {
+            const d = cardData[t.idx];
+            d.card.style.transition = 'left 0.4s cubic-bezier(0.34,1.56,0.64,1), top 0.4s cubic-bezier(0.34,1.56,0.64,1)';
+            d.card.style.left = t.tx + 'px';
+            d.card.style.top = t.ty + 'px';
+            d.card.style.transform = `translate(-50%, -100%) scale(${d.scale})`;
+            d.card.style.opacity = d.opacity;
+            d.line.style.display = '';
+            d.line.setAttribute('x1', d.pt.x); d.line.setAttribute('y1', d.pt.y);
+            d.line.setAttribute('x2', t.tx); d.line.setAttribute('y2', t.ty);
+            d.line.style.opacity = d.opacity;
+          }
+          // 过渡结束清标记
+          clearTimeout(state._doneTimer);
+          state._doneTimer = setTimeout(() => { state._animating = false; }, 450);
+        });
+      }
+
+      if (justCollapsed) {
+        state._animating = true;
+        for (const idx of group) {
+          const d = cardData[idx];
+          d.card.style.transition = 'none';
+          d.card.classList.remove('place-card-stacked');
+          d.card.dataset.clusterKey = '';
+          if (idx !== bestIdx) {
+            d.card.style.display = '';
+            const ti = targets.find(t => t.idx === idx);
+            d.card.style.left = (ti || { tx: bx }).tx + 'px';
+            d.card.style.top = (ti || { ty: by }).ty + 'px';
+            d.line.style.display = '';
+          }
+        }
+        requestAnimationFrame(() => {
+          for (const idx of group) { cardData[idx].card.offsetHeight; }
+          for (const idx of group) {
+            const d = cardData[idx];
+            d.card.style.transition = 'left 0.35s ease-in, top 0.35s ease-in, opacity 0.25s';
+            d.card.style.left = bx + 'px';
+            d.card.style.top = by + 'px';
+            d.card.style.transform = `translate(-50%, -100%) scale(${d.scale})`;
+            d.card.style.opacity = '0';
+            d.line.style.display = 'none';
+          }
+          clearTimeout(state._doneTimer);
+          state._doneTimer = setTimeout(() => {
+            for (const idx of group) {
+              const d = cardData[idx];
+              if (idx === bestIdx) {
+                d.card.style.transition = 'opacity 0.2s';
+                d.card.classList.add('place-card-stacked');
+                d.card.dataset.clusterKey = clusterKey;
+                d.card.style.opacity = d.opacity;
+                d.card.style.left = bx + 'px';
+                d.card.style.top = by + 'px';
+                d.line.style.display = '';
+                d.line.setAttribute('x1', d.pt.x); d.line.setAttribute('y1', d.pt.y);
+                d.line.setAttribute('x2', bx); d.line.setAttribute('y2', by);
+                d.line.style.opacity = d.opacity;
+              } else {
+                d.card.style.display = 'none';
+              }
+            }
+            state._animating = false;
+          }, 400);
+        });
+      }
+
+      // 稳态：动画中不干预 transition，动画完了清空
+      if (!state._animating) {
+        if (state.expanded) {
+          for (const t of targets) {
+            const d = cardData[t.idx];
+            d.card.style.transition = '';
+            d.card.style.display = '';
+            d.card.style.left = t.tx + 'px';
+            d.card.style.top = t.ty + 'px';
+            d.card.style.transform = `translate(-50%, -100%) scale(${d.scale})`;
+            d.card.style.opacity = d.opacity;
+            d.line.style.display = '';
+            d.line.setAttribute('x1', d.pt.x); d.line.setAttribute('y1', d.pt.y);
+            d.line.setAttribute('x2', t.tx); d.line.setAttribute('y2', t.ty);
+            d.line.style.opacity = d.opacity;
+          }
+        } else {
+          for (const idx of group) {
+            const d = cardData[idx];
+            d.card.style.transition = '';
+            d.card.classList.remove('place-card-stacked');
+            if (idx === bestIdx) {
+              d.card.dataset.clusterKey = clusterKey;
+              d.card.classList.add('place-card-stacked');
+              d.line.style.display = '';
+              d.line.setAttribute('x1', d.pt.x); d.line.setAttribute('y1', d.pt.y);
+              d.line.setAttribute('x2', bx); d.line.setAttribute('y2', by);
+              d.line.style.opacity = d.opacity;
+              d.card.style.display = '';
+              d.card.style.left = bx + 'px';
+              d.card.style.top = by + 'px';
+              d.card.style.transform = `translate(-50%, -100%) scale(${d.scale})`;
+              d.card.style.opacity = d.opacity;
+            } else {
+              d.card.dataset.clusterKey = '';
+              d.line.style.display = 'none';
+              d.card.style.display = 'none';
+            }
+          }
+        }
+      }
+    }
+  }
 }
 
 // ===== 搜索组件 =====
@@ -189,6 +558,7 @@ function showDetail(id) {
 
   document.getElementById('btn-edit-place').onclick = () => {
     card.classList.add('hidden');
+    earth.highlightFill(place.id);
     openEditModal(place);
   };
 }
@@ -241,6 +611,7 @@ function renderPhotos(place) {
     }
     await savePlace(place);
     renderPhotos(place);
+    syncPlaceCards();
     fileInput.value = '';
   };
 }
@@ -302,6 +673,7 @@ function refreshEarth() {
       earth.addArc(homeLocation.lat, homeLocation.lng, p.lat, p.lng, '#ffffff', p.rating || 3, p.id);
     }
   }
+  syncPlaceCards();
 }
 
 // ===== 编辑地点模态框 =====
@@ -317,6 +689,7 @@ function openEditModal(place) {
   renderModalPhotos();
   document.getElementById('add-modal').classList.remove('hidden');
   document.getElementById('add-modal').querySelector('.modal-header h2').textContent = '编辑地点';
+  document.getElementById('btn-delete-modal').style.display = '';
 }
 
 // ===== 绑定事件 =====
@@ -351,6 +724,7 @@ function bindEvents() {
     updateStarInput(0);
     renderModalPhotos();
     document.getElementById('add-modal').querySelector('.modal-header h2').textContent = '添加地点';
+    document.getElementById('btn-delete-modal').style.display = 'none';
     document.getElementById('add-modal').classList.remove('hidden');
     dropdown.classList.add('hidden');
     settingsBtn.classList.remove('active');
@@ -359,9 +733,20 @@ function bindEvents() {
   // 关闭按钮
   document.querySelectorAll('.btn-close, .modal-backdrop').forEach(el => {
     el.addEventListener('click', (e) => {
-      // 只关闭父级模态框
       const modal = e.target.closest('.modal');
-      if (modal) modal.classList.add('hidden');
+      if (modal) {
+        modal.classList.add('hidden');
+        if (modal.id === 'add-modal') {
+          const pid = selectedPlaceId;
+          if (pid) {
+            const p = places.find(pl => pl.id === pid);
+            if (p) earth.zoomOutFromPlace(p.lat, p.lng);
+            else earth.resetView();
+          } else {
+            earth.resetView();
+          }
+        }
+      }
     });
   });
 
@@ -374,7 +759,7 @@ function bindEvents() {
     await setMeta('home', c);
     document.getElementById('home-name').textContent = c.name;
     document.getElementById('home-display').classList.remove('hidden');
-    earth.setHome(c.lat, c.lng);
+    earth.setHome(c.lat, c.lng, c.name);
     refreshEarth();
   });
 
@@ -428,6 +813,7 @@ function bindEvents() {
       isEditing = false;
       updateStats();
       refreshEarth();
+      earth.zoomOutFromPlace(place.lat, place.lng);
       showDetail(place.id);
       return;
     }
@@ -456,6 +842,8 @@ function bindEvents() {
     if (homeLocation) {
       earth.addArc(homeLocation.lat, homeLocation.lng, newPlace.lat, newPlace.lng, '#ffffff', newPlace.rating, newPlace.id);
     }
+    syncPlaceCards();
+    earth.zoomOutFromPlace(newPlace.lat, newPlace.lng);
 
     showDetail(newPlace.id);
     } catch (err) {
@@ -481,7 +869,31 @@ function bindEvents() {
   // 取消添加
   document.getElementById('btn-cancel-add').addEventListener('click', () => {
     document.getElementById('add-modal').classList.add('hidden');
+    const pid = selectedPlaceId;
     isEditing = false;
+    if (pid) {
+      const p = places.find(pl => pl.id === pid);
+      if (p) earth.zoomOutFromPlace(p.lat, p.lng);
+      else earth.resetView();
+    } else {
+      earth.resetView();
+    }
+  });
+
+  // 编辑弹窗里的删除按钮
+  document.getElementById('btn-delete-modal').addEventListener('click', async () => {
+    if (!selectedPlaceId) return;
+    const place = places.find(p => p.id === selectedPlaceId);
+    if (!place) return;
+    if (!confirm(`删除 ${place.name} ？`)) return;
+    await deletePlace(place.id);
+    places = await getAllPlaces();
+    document.getElementById('add-modal').classList.add('hidden');
+    isEditing = false;
+    selectedPlaceId = null;
+    updateStats();
+    refreshEarth();
+    earth.resetView();
   });
 
   // 导出
@@ -513,14 +925,21 @@ function bindEvents() {
     }
   });
 
-  // 点击空白关闭详情
+  // 点击空白关闭详情（canvas 点击由地球自己处理，不关）
   document.addEventListener('click', (e) => {
     const card = document.getElementById('detail-card');
     if (card.classList.contains('hidden')) return;
+    if (e.target.tagName === 'CANVAS') return;
     if (!card.contains(e.target) && !e.target.closest('.modal')) {
       card.classList.add('hidden');
       selectedPlaceId = null;
     }
+  });
+
+  // 全局：点击非卡片区域回退视角
+  document.addEventListener('click', (e) => {
+    if (e.target.closest('.place-card') || e.target.closest('.place-card-badge')) return;
+    if (earth._focusedPlaceId) earth.resetView();
   });
 
   // 关闭详情

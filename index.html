@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>我的旅行 · 地球相册</title>
+  <title>Colorful · Meridian</title>
   <link rel="stylesheet" href="css/style.css">
 </head>
 <body>
@@ -13,7 +13,7 @@
   <!-- 顶部栏 -->
   <header id="header">
     <div class="header-left">
-      <h1>我的旅行</h1>
+      <h1>Colorful · Meridian</h1>
       <span id="stats" class="stats"></span>
     </div>
     <div class="header-right">
@@ -82,6 +82,7 @@
         </div>
       </div>
       <div class="modal-footer">
+        <button class="btn-outline" id="btn-delete-modal" style="margin-right:auto">删除</button>
         <button class="btn-secondary" id="btn-cancel-add">取消</button>
         <button class="btn-primary" id="btn-save-add">保存</button>
       </div>
@@ -125,6 +126,10 @@
       </div>
     </div>
   </div>
+
+  <!-- 3D 地点悬浮卡片覆盖层 -->
+  <svg id="connector-lines"></svg>
+  <div id="place-cards"></div>
 
   <script type="importmap">
   {
