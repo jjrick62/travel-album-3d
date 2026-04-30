@@ -94,6 +94,59 @@ body {
 .btn-triangle:hover { border-color: #888; }
 .btn-triangle.active { border-color: #888; background: rgba(255,255,255,0.06); }
 
+.btn-pause {
+  background: none;
+  border: 1px solid #444;
+  color: #fff;
+  width: 32px;
+  height: 32px;
+  border-radius: 6px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: border-color 0.2s, background 0.2s;
+}
+.btn-pause:hover { border-color: #888; }
+.btn-pause.paused { border-color: #666; background: rgba(255,255,255,0.08); }
+
+.pause-icon {
+  display: block;
+  width: 10px;
+  height: 10px;
+  position: relative;
+}
+/* 两条竖线 = 暂停 */
+.pause-icon::before,
+.pause-icon::after {
+  content: '';
+  position: absolute;
+  top: 0;
+  width: 3px;
+  height: 100%;
+  background: #ccc;
+  border-radius: 1px;
+  transition: all 0.2s;
+}
+.pause-icon::before { left: 0; }
+.pause-icon::after { right: 0; }
+
+/* 三角形 = 播放 */
+.btn-pause.paused .pause-icon::before {
+  width: 0;
+  height: 0;
+  background: transparent;
+  border-style: solid;
+  border-width: 5px 0 5px 8px;
+  border-color: transparent transparent transparent #ccc;
+  border-radius: 0;
+  left: 2px;
+  top: 0;
+}
+.btn-pause.paused .pause-icon::after {
+  display: none;
+}
+
 .btn-primary {
   background: #333;
   border: none;
@@ -394,6 +447,51 @@ body {
 }
 
 .photo-grid img:hover { opacity: 0.7; }
+
+.modal-photo-grid {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 4px;
+  margin-bottom: 8px;
+  min-height: 40px;
+}
+.modal-photo-grid:empty::after {
+  content: '暂无照片';
+  color: #555;
+  font-size: 12px;
+  grid-column: 1 / -1;
+  padding: 8px 0;
+}
+.modal-photo-wrap {
+  position: relative;
+  aspect-ratio: 1;
+  border-radius: 4px;
+  overflow: hidden;
+}
+.modal-photo-wrap img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+.modal-photo-del {
+  position: absolute;
+  top: 2px;
+  right: 2px;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: rgba(0,0,0,0.7);
+  border: none;
+  color: #999;
+  font-size: 12px;
+  line-height: 1;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: color 0.15s, background 0.15s;
+}
+.modal-photo-del:hover { color: #fff; background: rgba(200,60,60,0.8); }
 
 /* ===== 照片查看器 ===== */
 .photo-viewer-content {

@@ -17,6 +17,9 @@
       <span id="stats" class="stats"></span>
     </div>
     <div class="header-right">
+      <button id="btn-pause" class="btn-pause" title="暂停/播放">
+        <span class="pause-icon"></span>
+      </button>
       <button id="btn-add" class="btn-add">+</button>
       <button id="btn-settings" class="btn-triangle">&#9660;</button>
       <div id="settings-dropdown" class="dropdown hidden">
@@ -70,6 +73,12 @@
         <div class="form-group">
           <label for="place-notes">感想</label>
           <textarea id="place-notes" rows="3" placeholder="写点感想..."></textarea>
+        </div>
+        <div class="form-group">
+          <label>照片</label>
+          <div class="modal-photo-grid" id="modal-photo-grid"></div>
+          <button id="btn-modal-add-photo" class="btn-text">+ 添加照片</button>
+          <input type="file" id="modal-photo-input" accept="image/*" multiple hidden>
         </div>
       </div>
       <div class="modal-footer">

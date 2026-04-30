@@ -12,6 +12,7 @@ let selectedCity = null;
 let addRating = 0;
 let selectedPlaceId = null;
 let isEditing = false;
+let tempPhotos = [];
 
 // ===== DOM 引用 =====
 const $ = (id) => document.getElementById(id);
@@ -31,6 +32,11 @@ async function init() {
   earth = new Earth(document.getElementById('globe-container'));
   earth.onPlaceClick = (id) => showDetail(id);
   earth._onDataReady = () => { refreshEarth(); };
+
+  // 手机端摄像机初始拉远
+  if (window.innerWidth <= 768) {
+    earth.camera.position.set(0, 2.0, 5.2);
+  }
 
   // 先加载已有地点数据，再启动（地图数据异步加载，不阻塞）
   applyEarthData();
@@ -247,6 +253,29 @@ function fileToDataUrl(file) {
   });
 }
 
+function renderModalPhotos() {
+  const grid = document.getElementById('modal-photo-grid');
+  grid.innerHTML = '';
+  for (let i = 0; i < tempPhotos.length; i++) {
+    const photo = tempPhotos[i];
+    const wrap = document.createElement('div');
+    wrap.className = 'modal-photo-wrap';
+    const img = document.createElement('img');
+    img.src = photo.dataUrl;
+    img.title = photo.caption || '照片';
+    wrap.appendChild(img);
+    const del = document.createElement('button');
+    del.className = 'modal-photo-del';
+    del.textContent = '×';
+    del.addEventListener('click', () => {
+      tempPhotos.splice(i, 1);
+      renderModalPhotos();
+    });
+    wrap.appendChild(del);
+    grid.appendChild(wrap);
+  }
+}
+
 function openPhotoViewer(photo, place) {
   const viewer = document.getElementById('photo-viewer');
   viewer.classList.remove('hidden');
@@ -280,16 +309,27 @@ function openEditModal(place) {
   isEditing = true;
   selectedCity = { name: place.name, province: place.fullName ? place.fullName.split('·')[0] : '', lat: place.lat, lng: place.lng };
   addRating = place.rating || 0;
+  tempPhotos = place.photos ? place.photos.slice() : [];
   document.getElementById('city-search').value = place.name;
   document.getElementById('visit-date').value = place.visitDate || '';
   document.getElementById('place-notes').value = place.notes || '';
   updateStarInput(addRating);
+  renderModalPhotos();
   document.getElementById('add-modal').classList.remove('hidden');
   document.getElementById('add-modal').querySelector('.modal-header h2').textContent = '编辑地点';
 }
 
 // ===== 绑定事件 =====
 function bindEvents() {
+  // 暂停/播放按钮
+  const pauseBtn = document.getElementById('btn-pause');
+  if (pauseBtn) {
+    pauseBtn.addEventListener('click', () => {
+      const playing = earth.toggleRotation();
+      pauseBtn.classList.toggle('paused', !playing);
+    });
+  }
+
   // 设置下拉菜单
   const settingsBtn = document.getElementById('btn-settings');
   const dropdown = document.getElementById('settings-dropdown');
@@ -304,10 +344,12 @@ function bindEvents() {
     isEditing = false;
     selectedCity = null;
     addRating = 0;
+    tempPhotos = [];
     document.getElementById('city-search').value = '';
     document.getElementById('visit-date').value = new Date().toISOString().split('T')[0];
     document.getElementById('place-notes').value = '';
     updateStarInput(0);
+    renderModalPhotos();
     document.getElementById('add-modal').querySelector('.modal-header h2').textContent = '添加地点';
     document.getElementById('add-modal').classList.remove('hidden');
     dropdown.classList.add('hidden');
@@ -379,6 +421,7 @@ function bindEvents() {
       place.rating = addRating;
       place.notes = document.getElementById('place-notes').value;
       place.visitDate = document.getElementById('visit-date').value;
+      place.photos = tempPhotos.slice();
       await savePlace(place);
       places = await getAllPlaces();
       document.getElementById('add-modal').classList.add('hidden');
@@ -400,7 +443,7 @@ function bindEvents() {
       rating: addRating || 3,
       notes: document.getElementById('place-notes').value,
       visitDate: document.getElementById('visit-date').value,
-      photos: []
+      photos: tempPhotos.slice()
     };
 
     await savePlace(newPlace);
@@ -419,6 +462,20 @@ function bindEvents() {
       console.error('Save failed:', err);
       alert('保存失败：' + err.message);
     }
+  });
+
+  // 模态框照片：添加按钮
+  document.getElementById('btn-modal-add-photo').addEventListener('click', () => {
+    document.getElementById('modal-photo-input').click();
+  });
+  document.getElementById('modal-photo-input').addEventListener('change', async (e) => {
+    const files = Array.from(e.target.files);
+    for (const file of files) {
+      const dataUrl = await fileToDataUrl(file);
+      tempPhotos.push({ id: crypto.randomUUID(), dataUrl, caption: '' });
+    }
+    renderModalPhotos();
+    e.target.value = '';
   });
 
   // 取消添加

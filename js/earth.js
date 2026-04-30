@@ -47,6 +47,14 @@ export class Earth {
     this.earthGroup = new THREE.Group();
     this.scene.add(this.earthGroup);
 
+    // 深度遮挡球：放大到县界级别时撑开，挡住地球背面粒子
+    this._occluder = new THREE.Mesh(
+      new THREE.SphereGeometry(this.earthRadius, 64, 32),
+      new THREE.MeshBasicMaterial({ colorWrite: false, depthWrite: true, transparent: false })
+    );
+    this._occluder.renderOrder = -1;
+    this.earthGroup.add(this._occluder);
+
     window.addEventListener('resize', () => this._onResize());
   }
 
@@ -55,7 +63,7 @@ export class Earth {
     this.controls.enableDamping = true;
     this.controls.dampingFactor = 0.05;
     this.controls.rotateSpeed = 0.5;
-    this.controls.minDistance = 1.8;
+    this.controls.minDistance = 1.55;
     this.controls.maxDistance = 6;
     this.controls.target.set(0, 0, 0);
   }
@@ -106,7 +114,6 @@ export class Earth {
       console.warn('Map data load failed:', err);
     }
 
-    this._drawRim();
   }
 
   _geoJSONToParticles(geojson, style, propName, skipFade = false, step = 1) {
@@ -166,7 +173,8 @@ export class Earth {
   }
 
   clearCoastlines() {
-    for (const key of ['coastlinePoints', 'borderPoints', 'admin1Points', 'cityPoints', 'districtPoints']) {
+    this._breathStartTime = null;
+    for (const key of ['coastlinePoints', 'borderPoints', 'admin1ChinaPoints', 'admin1ForeignPoints', 'cityPoints', 'districtPoints']) {
       if (this[key]) {
         this.earthGroup.remove(this[key]);
         this[key] = null;
@@ -174,56 +182,68 @@ export class Earth {
     }
   }
 
-  // 缩放图层辅助：进入阈值立即显示，退出阈值平滑淡出
+  // 缩放图层辅助：平滑淡入淡出，不跳变
   _applyZoomLayer(mesh, dist, threshold, opacity, stateKey) {
     const target = dist < threshold ? opacity : 0;
     if (this[stateKey] === undefined) this[stateKey] = 0;
-    if (target > 0 && this[stateKey] < 0.01) {
-      this[stateKey] = target;
-    } else if (target === 0 && this[stateKey] < 0.005) {
-      this[stateKey] = 0;
-    } else {
-      this[stateKey] += (target - this[stateKey]) * 0.05;
-    }
+    // 淡入用较慢速率，淡出稍快
+    const speed = target > this[stateKey] ? 0.025 : 0.06;
+    this[stateKey] += (target - this[stateKey]) * speed;
+    if (Math.abs(this[stateKey] - target) < 0.001) this[stateKey] = target;
     mesh.material.opacity = this[stateKey];
   }
 
-  // ===== 地球地平线粒子轮廓 =====
-  _drawRim() {
-    const R = this.earthRadius * 1.03;
-    const count = 300;
+  // ===== 赤道粒子光环 =====
+  _drawEquatorRing() {
+    const R = 2.4;
+    const count = 600;
     const pts = new Float32Array(count * 3);
     for (let i = 0; i < count; i++) {
-      const a = (i / count) * Math.PI * 2;
-      // 略微随机偏移，看起来像自然粒子
-      const jitter = 1 + (Math.random() - 0.5) * 0.02;
-      pts[i*3] = R * Math.cos(a) * jitter;
-      pts[i*3+1] = (Math.random() - 0.5) * 0.03;
-      pts[i*3+2] = R * Math.sin(a) * jitter;
+      const lng = (i / count) * 360;
+      const lat = (Math.random() - 0.5) * 5; // ±2.5° 随机飘散
+      const p = this._latLngToVec3(lat, lng, R * (1 + (Math.random() - 0.5) * 0.02));
+      pts[i*3] = p.x;
+      pts[i*3+1] = p.y;
+      pts[i*3+2] = p.z;
     }
     const geo = new THREE.BufferGeometry();
     geo.setAttribute('position', new THREE.Float32BufferAttribute(pts, 3));
     const mat = new THREE.PointsMaterial({
-      color: 0xffffff, size: 1.2, transparent: true, opacity: 0.2,
+      color: 0xffffff, size: 1.6, transparent: true, opacity: 0.35,
       blending: THREE.AdditiveBlending, depthWrite: false, sizeAttenuation: false,
     });
-    this.rimPoints = new THREE.Points(geo, mat);
-    this.scene.add(this.rimPoints);
-    this._sizedPoints.push({ mesh: this.rimPoints, baseSize: 1.2 });
+    this._ringPoints = new THREE.Points(geo, mat);
+    this.scene.add(this._ringPoints);
+    this._sizedPoints.push({ mesh: this._ringPoints, baseSize: 1.0 });
   }
 
-  // ===== 加载省级行政区边界 =====
+  // ===== 加载全球一级行政区边界（省/州/都道府县） =====
   async loadAdminBoundaries() {
     try {
-      const resp = await fetch('data/map/china_provinces.geojson');
+      const resp = await fetch('data/map/world_admin1.geojson');
       if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
       const data = await resp.json();
-      this._geoJSONToParticles(data, {
-        color: 0xffffff,
-        size: 1.5,
-        opacity: 0.4,
-      }, 'admin1Points', true);
-      console.log(`[Earth] admin1 boundaries loaded`);
+
+      // 拆成中国和国外两套 mesh，独立控制缩放阈值
+      const chinaF = [], foreignF = [];
+      for (const f of data.features) {
+        const p = f.properties || {};
+        if (p.iso_a2 === 'CN' || p.admin === 'China') chinaF.push(f);
+        else foreignF.push(f);
+      }
+
+      if (chinaF.length > 0) {
+        this._geoJSONToParticles({ type: 'FeatureCollection', features: chinaF }, {
+          color: 0xffffff, size: 1.5, opacity: 0.4,
+        }, 'admin1ChinaPoints', true);
+      }
+      if (foreignF.length > 0) {
+        this._geoJSONToParticles({ type: 'FeatureCollection', features: foreignF }, {
+          color: 0xffffff, size: 0.85, opacity: 0.28,
+        }, 'admin1ForeignPoints', true);
+      }
+
+      console.log(`[Earth] admin1 loaded: ${chinaF.length} China + ${foreignF.length} foreign`);
     } catch (err) {
       console.warn('Admin1 load failed:', err);
     }
@@ -572,12 +592,17 @@ export class Earth {
     this.rotating = true;
   }
 
+  toggleRotation() {
+    this.rotating = !this.rotating;
+    return this.rotating;
+  }
+
   // 空格切换旋转
   _initKeyboard() {
     document.addEventListener('keydown', (e) => {
       if (e.key === ' ' || e.code === 'Space') {
         e.preventDefault();
-        this.rotating = !this.rotating;
+        this.toggleRotation();
       }
     });
   }
@@ -608,6 +633,7 @@ export class Earth {
   // ===== 启动 =====
   start() {
     this._generateStars();
+    this._drawEquatorRing();
     this._animate();
   }
 
@@ -632,10 +658,25 @@ export class Earth {
       }
     }
 
-    // 海岸线持续呼吸（淡入淡出）
-    if (this.coastlinePoints && this.fadingItems.length === 0) {
-      const breathe = 0.50 + 0.30 * Math.sin(performance.now() * 0.0008);
-      this.coastlinePoints.material.opacity = breathe;
+    // 海岸线呼吸 —— 等淡入完成或超过 8 秒兜底
+    if (this.coastlinePoints) {
+      if (!this._breathStartTime && this.fadingItems.length === 0) {
+        this._breathStartTime = performance.now();
+      }
+      if (!this._breathStartTime && performance.now() > 8000) {
+        this._breathStartTime = performance.now(); // 超时兜底
+      }
+      if (this._breathStartTime) {
+        const breathe = 0.50 + 0.30 * Math.sin(performance.now() * 0.0008);
+        this.coastlinePoints.material.opacity = breathe;
+      }
+    }
+
+    // 赤道光环自转 + 呼吸
+    if (this._ringPoints) {
+      this._ringPoints.rotation.y += 0.0001;
+      const ringBreath = 0.25 + 0.15 * Math.sin(performance.now() * 0.0012);
+      this._ringPoints.material.opacity = ringBreath;
     }
 
     // 常住地发光粒子脉冲
@@ -645,48 +686,54 @@ export class Earth {
     }
 
     // zoom 级别控制边界显隐
-    // 海岸线/国界/省界 —— 等海岸线淡入完再启用（共用 fadingItems 节奏）
+    // 国界线 —— 等海岸线淡入完再启用
     if (this.fadingItems.length === 0) {
-      const dist = this.camera.position.distanceTo(this.controls.target);
+      const dist2 = this.camera.position.distanceTo(this.controls.target);
 
-      // 国界线淡入淡出
       if (this.borderPoints) {
-        const target = dist < 5 ? 0.8 : 0;
+        const target = dist2 < 5 ? 0.8 : 0;
         if (this._borderOpacity === undefined) this._borderOpacity = target;
         this._borderOpacity += (target - this._borderOpacity) * 0.08;
         if (Math.abs(this._borderOpacity - target) < 0.001) this._borderOpacity = target;
         this.borderPoints.material.opacity = this._borderOpacity;
       }
-
-      // 省界线淡入淡出
-      if (this.admin1Points) {
-        const target = dist < 3.2 ? 0.4 : 0;
-        if (this._adminOpacity === undefined) this._adminOpacity = target;
-        this._adminOpacity += (target - this._adminOpacity) * 0.08;
-        if (Math.abs(this._adminOpacity - target) < 0.001) this._adminOpacity = target;
-        this.admin1Points.material.opacity = this._adminOpacity;
-      }
     }
 
-    // 市级边界
+    // 中国省界 —— 最先出现
+    if (this.admin1ChinaPoints) {
+      this._applyZoomLayer(this.admin1ChinaPoints, dist, 2.5, 0.4, '_chinaAdminOpacity');
+    }
+    // 国外州界 + 中国市界 —— 同一层级
+    if (this.admin1ForeignPoints) {
+      this._applyZoomLayer(this.admin1ForeignPoints, dist, 1.95, 0.28, '_foreignAdminOpacity');
+    }
+
+    // 中国市界
     if (this.cityPoints) {
-      this._applyZoomLayer(this.cityPoints, dist, 2.1, 0.5, '_cityOpacity');
+      this._applyZoomLayer(this.cityPoints, dist, 1.95, 0.5, '_cityOpacity');
     }
 
-    // 县级边界懒加载 + 显隐
-    if (dist < 2.4 && !this.districtPoints && !this._districtsLoading) {
+    // 中国县界懒加载 + 显隐
+    if (dist < 2.2 && !this.districtPoints && !this._districtsLoading) {
       this.loadDistricts();
     }
     if (this.districtPoints) {
-      this._applyZoomLayer(this.districtPoints, dist, 1.85, 0.4, '_distOpacity');
+      this._applyZoomLayer(this.districtPoints, dist, 1.7, 0.4, '_distOpacity');
+    }
+
+    // 深度遮挡球：只在县界级别激活，遮挡地球背面粒子
+    if (this._occluder) {
+      const t = Math.min(1, Math.max(0, (1.85 - dist) / (1.85 - 1.55)));
+      this._occluder.scale.setScalar(t);
+      this._occluder.material.depthWrite = t > 0.02;
     }
 
     // 地点填充粒子 —— 放大到对应行政级别才点亮
     for (const pf of this._placeFills) {
       if (!pf.mesh) continue;
       let threshold;
-      if (pf.level === 'district') threshold = 1.85;
-      else if (pf.level === 'city') threshold = 2.1;
+      if (pf.level === 'district') threshold = 1.7;
+      else if (pf.level === 'city') threshold = 1.95;
       else { pf.mesh.material.opacity = 0; continue; }
       const target = dist < threshold ? 0.55 : 0;
       pf.opacity += (target - pf.opacity) * 0.06;
