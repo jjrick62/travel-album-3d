@@ -3,6 +3,10 @@
 import { initDB, setMeta, getAllPlaces, savePlace, deletePlace, exportAllData } from './data.js';
 import { Earth } from './earth.js';
 
+// 触摸设备检测
+const IS_TOUCH = ('ontouchstart' in window) || (navigator.maxTouchPoints > 0);
+const DOUBLE_TAP_MS = IS_TOUCH ? 250 : 350;
+
 // ===== 全局状态 =====
 let earth;
 let homeLocation = null;
@@ -34,8 +38,11 @@ async function init() {
   earth.onMissClick = () => {}; // 改由全局处理
   earth._onDataReady = () => { refreshEarth(); };
 
-  // 手机端摄像机初始拉远
-  if (window.innerWidth <= 768) {
+  // 手机/平板/桌面三档摄像机初始距离
+  const w = window.innerWidth;
+  if (w <= 480) {
+    earth.camera.position.set(0, 2.8, 6.0);
+  } else if (w <= 768) {
     earth.camera.position.set(0, 2.0, 5.2);
   }
 
@@ -68,7 +75,7 @@ async function init() {
 // ===== 应用数据到地球 =====
 function applyEarthData() {
   if (homeLocation) {
-    earth.setHome(homeLocation.lat, homeLocation.lng, homeLocation.name);
+    earth.setHome(homeLocation.lat, homeLocation.lng, homeLocation.name, homeLocation.province);
   }
   for (const p of places) {
     earth.addPlace(p, '#ffffff', p.rating || 3);
@@ -123,7 +130,7 @@ function createPlaceCard(place) {
     }
 
     const now = Date.now();
-    if (card._lastTap && now - card._lastTap < 350) {
+    if (card._lastTap && now - card._lastTap < DOUBLE_TAP_MS) {
       // 双击 → 直接进入编辑
       card._lastTap = 0;
       selectedPlaceId = place.id;
@@ -133,18 +140,19 @@ function createPlaceCard(place) {
       earth.focusOnPlace(place.lat, place.lng, () => openEditModal(place));
     } else {
       card._lastTap = now;
+      // 已聚焦卡片：第二次点击直接进编辑，不再飞一次
+      if (earth._focusedPlaceId === place.id) {
+        selectedPlaceId = place.id;
+        document.getElementById('detail-card').classList.add('hidden');
+        openEditModal(place);
+        return;
+      }
       setTimeout(() => {
         if (card._lastTap !== now) return;
-        if (earth._focusedPlaceId === place.id) {
-          selectedPlaceId = place.id;
-          document.getElementById('detail-card').classList.add('hidden');
-          earth.focusOnPlace(place.lat, place.lng, () => openEditModal(place));
-        } else {
-          earth._focusedPlaceId = place.id;
-          earth.highlightFill(place.id);
-          earth.focusOnPlace(place.lat, place.lng);
-        }
-      }, 350);
+        earth._focusedPlaceId = place.id;
+        earth.highlightFill(place.id);
+        earth.focusOnPlace(place.lat, place.lng);
+      }, DOUBLE_TAP_MS);
     }
   });
   document.getElementById('place-cards').appendChild(card);
@@ -220,7 +228,10 @@ function updatePlaceCards() {
 
   // 第二遍：距离聚类（滞回：120px 合入，已有群 180px 才拆）
   if (!updatePlaceCards._lastCluster) updatePlaceCards._lastCluster = {}; // placeId → clusterTag
-  const joinThresh = 120, splitThresh = 180;
+  const screenW = window.innerWidth;
+  const clusterScale = Math.min(1, Math.max(0.35, screenW / 768));
+  const joinThresh = Math.round(120 * clusterScale);
+  const splitThresh = Math.round(180 * clusterScale);
   const clustered = new Set();
   const clusters = [];
   for (let i = 0; i < cardData.length; i++) {
@@ -304,7 +315,7 @@ function updatePlaceCards() {
       const rep = cardData[bestIdx];
 
       // 计算展开目标：沿各卡片原始方向径向散开
-      const spreadR = 140;
+      const spreadR = Math.round(140 * clusterScale);
       const targets = [];
       for (const idx of group) {
         const d = cardData[idx];
@@ -759,7 +770,7 @@ function bindEvents() {
     await setMeta('home', c);
     document.getElementById('home-name').textContent = c.name;
     document.getElementById('home-display').classList.remove('hidden');
-    earth.setHome(c.lat, c.lng, c.name);
+    earth.setHome(c.lat, c.lng, c.name, c.province);
     refreshEarth();
   });
 
@@ -910,6 +921,14 @@ function bindEvents() {
     settingsBtn.classList.remove('active');
   });
 
+  // 地点总览
+  document.getElementById('btn-overview').addEventListener('click', () => {
+    dropdown.classList.add('hidden');
+    settingsBtn.classList.remove('active');
+    renderOverview();
+    document.getElementById('overview-modal').classList.remove('hidden');
+  });
+
   // 重置视角
   document.getElementById('btn-reset-view').addEventListener('click', () => {
     earth.resetView();
@@ -939,6 +958,7 @@ function bindEvents() {
   // 全局：点击非卡片区域回退视角
   document.addEventListener('click', (e) => {
     if (e.target.closest('.place-card') || e.target.closest('.place-card-badge')) return;
+    if (e.target.closest('.modal') || e.target.closest('.dropdown')) return;
     if (earth._focusedPlaceId) earth.resetView();
   });
 
@@ -946,6 +966,94 @@ function bindEvents() {
   document.getElementById('btn-close-detail').addEventListener('click', () => {
     document.getElementById('detail-card').classList.add('hidden');
     selectedPlaceId = null;
+  });
+
+  // 总览弹窗关闭
+  document.getElementById('overview-modal').querySelector('.btn-close').addEventListener('click', () => {
+    document.getElementById('overview-modal').classList.add('hidden');
+  });
+  document.getElementById('overview-modal').querySelector('.modal-backdrop').addEventListener('click', () => {
+    document.getElementById('overview-modal').classList.add('hidden');
+  });
+}
+
+// ===== 地点总览列表 =====
+function renderOverview() {
+  const container = document.getElementById('overview-list');
+  const sorted = [...places].sort((a, b) => (b.visitDate || '').localeCompare(a.visitDate || ''));
+
+  const total = sorted.length;
+  const avg = total > 0
+    ? (sorted.reduce((s, p) => s + (p.rating || 0), 0) / total).toFixed(1)
+    : '0';
+  document.getElementById('overview-stats').textContent = `${total} 个地点 · ★ ${avg}`;
+
+  if (total === 0) {
+    container.innerHTML = '<div class="overview-empty">还没有地点，点击右上角 + 添加</div>';
+    return;
+  }
+
+  container.innerHTML = sorted.map(p => {
+    const stars = '★'.repeat(p.rating || 3) + '☆'.repeat(5 - (p.rating || 3));
+    const photoCount = p.photos ? p.photos.length : 0;
+    return `
+      <div class="overview-item" data-id="${p.id}">
+        <div class="overview-item-main">
+          <div class="overview-item-name">${p.name}</div>
+          <div class="overview-item-sub">${p.fullName || p.name} · ${p.visitDate || '无日期'}</div>
+        </div>
+        <span class="overview-item-stars">${stars}</span>
+        <span class="overview-item-photos">${photoCount}张</span>
+        <div class="overview-item-actions">
+          <button class="overview-btn" data-action="edit" data-id="${p.id}">编辑</button>
+          <button class="overview-btn danger" data-action="delete" data-id="${p.id}">删除</button>
+        </div>
+      </div>`;
+  }).join('');
+
+  // 整行点击 — 编辑
+  container.querySelectorAll('.overview-item').forEach(item => {
+    item.addEventListener('click', (e) => {
+      if (e.target.closest('button')) return;
+      const id = item.dataset.id;
+      document.getElementById('overview-modal').classList.add('hidden');
+      const place = places.find(p => p.id === id);
+      if (!place) return;
+      selectedPlaceId = id;
+      earth._focusedPlaceId = id;
+      earth.highlightFill(id);
+      earth.focusOnPlace(place.lat, place.lng, () => openEditModal(place));
+    });
+  });
+
+  // 编辑按钮
+  container.querySelectorAll('[data-action="edit"]').forEach(btn => {
+    btn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      const id = btn.dataset.id;
+      document.getElementById('overview-modal').classList.add('hidden');
+      const place = places.find(p => p.id === id);
+      if (!place) return;
+      selectedPlaceId = id;
+      earth._focusedPlaceId = id;
+      earth.highlightFill(id);
+      earth.focusOnPlace(place.lat, place.lng, () => openEditModal(place));
+    });
+  });
+
+  // 删除按钮
+  container.querySelectorAll('[data-action="delete"]').forEach(btn => {
+    btn.addEventListener('click', async (e) => {
+      e.stopPropagation();
+      const id = btn.dataset.id;
+      const place = places.find(p => p.id === id);
+      if (!place || !confirm(`删除 ${place.name} ？`)) return;
+      await deletePlace(id);
+      places = await getAllPlaces();
+      updateStats();
+      refreshEarth();
+      renderOverview();
+    });
   });
 }
 

@@ -35,6 +35,7 @@
         </div>
         <div class="dropdown-divider"></div>
         <button id="btn-export" class="dropdown-btn">导出数据</button>
+        <button id="btn-overview" class="dropdown-btn">地点总览</button>
         <button id="btn-reset-view" class="dropdown-btn">重置视角</button>
       </div>
     </div>
@@ -111,6 +112,19 @@
     <div class="detail-footer">
       <button id="btn-edit-place" class="btn-secondary">编辑</button>
       <button id="btn-delete-place" class="btn-outline">删除</button>
+    </div>
+  </div>
+
+  <!-- 地点总览 -->
+  <div id="overview-modal" class="modal hidden">
+    <div class="modal-backdrop"></div>
+    <div class="overview-content">
+      <div class="overview-header">
+        <h2>地点总览</h2>
+        <span id="overview-stats" class="overview-stats"></span>
+        <button class="btn-close">&times;</button>
+      </div>
+      <div class="overview-body" id="overview-list"></div>
     </div>
   </div>
 

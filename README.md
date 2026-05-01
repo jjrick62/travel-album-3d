@@ -1,76 +1,106 @@
-# Travel Album 3D
+# Colorful · Meridian
 
-A particle-based 3D Earth travel album built with Three.js. Record places you've visited, mark them on a glowing particle globe with China's administrative boundaries down to district level.
+一个基于 Three.js 的 3D 粒子地球旅行相册。用发光粒子记录你走过的每一个地方，在旋转的星球上标记属于你的足迹。
 
-All data stored locally in IndexedDB. No backend, no signup, no tracking.
+所有数据存储在浏览器 IndexedDB 中，无需后端、无需注册、无追踪。
 
-## Features
+## 功能
 
-- **3D Particle Earth** — Coastlines, country borders, and China's province/city/district boundaries rendered as white particles with additive blending. Earth auto-rotates with zoom-adaptive speed and drag sensitivity.
-- **Four-Level Administrative Detail** — Boundaries reveal progressively as you zoom in: borders at global view, provinces at moderate zoom, cities and districts at close range. Each level uses distinct particle density and size.
-- **Region-Fill Highlighting** — Visited locations fill their corresponding administrative polygon with dense particles, creating a glow effect that matches the map aesthetic. Zoom out and the fill collapses to a subtle luminous dot.
-- **Home-to-Destination Arcs** — Quadratic Bezier curves projected above the sphere surface connect your home base to each visited place.
-- **Full Chinese City Search** — 3,200+ entries covering all provinces, prefecture-level cities, and counties. Relevance-ranked search with instant dropdown.
-- **Offline Map Data** — All GeoJSON boundaries stored locally. No runtime network dependency for map rendering.
-- **Photo Gallery** — Attach photos to each place. Thumbnail grid in the detail card, full-size viewer with captions.
-- **Star Ratings** — Rate each place 1-5. The fill density and dot brightness scale with rating.
-- **Export / Import** — Download all data as JSON. Import to restore or share.
-- **Persistent Storage** — IndexedDB-backed. Refresh the page, close the browser — your data stays.
+- **3D 粒子地球** — 海岸线、国界、中国省/市/县边界以白色发光粒子渲染，叠加混合。地球自动旋转，缩放越大旋转越慢，拖拽灵敏度自适应。
+- **四级行政区划** — 边界随缩放逐级呈现：全球视角显示国界，中等缩放显示省界，近距离显示市界和县界。每级使用不同的粒子密度和尺寸。
+- **区域填充高亮** — 已访问地点对应的行政区划多边形以密集粒子填充，产生发光效果。缩小后填充坍缩为微小的发光点。
+- **常住地弧线** — 二次贝塞尔曲线从你的常住地连接到每个目的地，悬浮于地球表面之上。
+- **悬浮地点卡片** — HTML+SVG 覆盖层，每帧 3D→2D 投影定位。卡片从地表沿径向向外偏移，细线连接。背面卡片自动缩小渐隐。
+- **卡片智能聚类** — 距离过近的卡片自动合并为折叠卡组，带滞回逻辑防抖。点击展开，弹簧曲线径向散开。代表卡片按行政区层级优先选择。
+- **摄像机飞行** — 点击卡片平滑飞至地点，聚焦时暂停自转。编辑完成后沿径向拉远回总览。点击空白保持当前视角纯缩小。
+- **中国城市搜索** — 3200+ 条目覆盖所有省、地级市、区县。相关度排序，即时下拉。
+- **离线地图数据** — 所有 GeoJSON 边界本地存储，地图渲染无运行时网络依赖。
+- **照片管理** — 为每个地点添加照片。详情卡片缩略图网格，全尺寸查看器支持说明文字。
+- **星级评分** — 1-5 星评分，填充密度和光点亮度随评分变化。
+- **导出 / 导入** — 下载全部数据为 JSON，导入恢复或分享。
+- **地点总览** — 列表视图浏览所有地点，支持排序、编辑、删除。
+- **流星效果** — 随机流星沿地表切向滑行，后期加速径向飞离。
+- **赤道粒子光环** — 环绕地球的粒子环，缓慢自转并呼吸。
+- **背面粒子半透明** — 地球背面边界粒子以正面 35% 亮度渲染，全缩放级别生效。
+- **粒子呼吸动画** — 各级边界粒子以不同频率呼吸，海岸线常亮。
+- **PWA 支持** — 可安装到主屏幕，Service Worker 离线缓存，断网可用。
+- **响应式布局** — 三断点适配（手机竖屏/横屏/桌面），rem 等比缩放，聚类阈值随屏宽自适应。
+- **触摸优化** — 禁浏览器默认手势，OrbitControls 完全接管触摸。双击延迟自适应触摸设备。
 
-## Tech Stack
+## 技术栈
 
-| Layer | Technology |
-|-------|------------|
-| 3D Engine | Three.js (ES module, CDN) |
-| Controls | OrbitControls with adaptive sensitivity |
-| Storage | IndexedDB (raw API) |
-| Map Data | DataV GeoAtlas (GeoJSON, 23MB district boundaries lazy-loaded) |
-| UI | Vanilla HTML/CSS/JS, dark monochrome |
+| 层 | 技术 |
+|---|------|
+| 3D 引擎 | Three.js v0.160 (ES module, CDN) |
+| 交互控制 | OrbitControls，自适应灵敏度 |
+| 存储 | IndexedDB (原生 API) |
+| 离线 | Service Worker，分层缓存策略 |
+| 地图数据 | DataV GeoAtlas (GeoJSON，县级边界 23MB 懒加载) |
+| PWA | Web App Manifest，standalone 模式 |
+| UI | 原生 HTML/CSS/JS，暗色单色调 |
 
-## Project Structure
+## 项目结构
 
 ```
 travel-album-3d/
-├── index.html              # Entry point
-├── css/style.css            # Dark monochrome UI
+├── index.html                 # 入口页面
+├── manifest.json              # PWA 清单
+├── sw.js                      # Service Worker 离线缓存
+├── icon-192.png               # PWA 图标
+├── icon-512.png
+├── favicon-32.png
+├── css/
+│   └── style.css              # 暗色 UI，rem 响应式三断点
 ├── js/
-│   ├── app.js               # UI logic, search, persistence
-│   ├── earth.js              # Three.js particle globe engine
-│   └── data.js               # IndexedDB data layer
+│   ├── app.js                 # UI 逻辑、搜索、持久化、悬浮卡片
+│   ├── earth.js               # Three.js 粒子地球引擎
+│   └── data.js                # IndexedDB 数据层
 ├── data/
-│   ├── cities.json           # 3,229 Chinese city/district entries
+│   ├── cities.json            # 3229 条中国城市/区县数据
 │   └── map/
-│       ├── coastline.geojson  # Global coastline
-│       ├── borders.geojson    # Country borders
-│       ├── china_provinces.geojson  # Province boundaries
-│       ├── china_cities.geojson     # City boundaries (3.2 MB)
-│       └── china_districts.geojson  # District boundaries (23 MB, lazy)
+│       ├── coastline.geojson       # 全球海岸线
+│       ├── borders.geojson         # 国界线
+│       ├── world_admin1.geojson    # 全球一级行政区 (17MB)
+│       ├── china_provinces.geojson # 中国省界
+│       ├── china_cities.geojson    # 中国市界 (3.2MB)
+│       └── china_districts.geojson # 中国县界 (23MB，懒加载)
+├── DEVLOG.md                  # 开发日志
+├── IMPL_PLAN.md               # 移动端 App 化实施方案
 └── README.md
 ```
 
-## Getting Started
+## 快速开始
 
-Serve the project root with any static file server:
+使用任意静态文件服务器托管项目根目录：
 
 ```bash
-npx http-server . -p 8081
+npx http-server . -p 8081 -c-1
 ```
 
-Open `http://localhost:8081` in a modern browser (Chrome/Firefox/Edge, ES modules required).
+打开 `http://localhost:8081`，需要支持 ES modules 的现代浏览器。
 
-## Usage
+## 使用指南
 
-1. Open the settings dropdown and set your home city.
-2. Click [+] to add a place — search by city or district name, set a date and rating.
-3. Zoom in to reveal province, city, and district boundaries.
-4. Click a glowing dot on the globe to open the detail card.
-5. Add photos, edit notes, change ratings.
-6. Export your data anytime from the settings menu.
+1. 打开右上角设置下拉菜单，搜索并设置你的常住地。
+2. 点击 `+` 添加地点 — 搜索城市或区县名称，设置日期和评分。
+3. 缩放地球查看不同级别的行政区划边界。
+4. 点击地球上的发光点或悬浮卡片查看地点详情。
+5. 添加照片、编辑感想、修改评分。
+6. 双击卡片或点击详情中的"编辑"进入编辑模式。
+7. 随时从设置菜单导出数据备份。
 
-## Browser Support
+## 部署
 
-Chrome 80+, Firefox 80+, Edge 80+, Safari 15+. Requires ES modules, IndexedDB, and WebGL.
+项目已部署至 GitHub Pages：https://jjrick62.github.io/travel-album-3d/
 
-## License
+数据存储在浏览器 IndexedDB 中，与 GitHub Pages 无关。换设备需导出/导入 JSON。
+
+## 浏览器支持
+
+Chrome 80+、Firefox 80+、Edge 80+、Safari 15+。需要 ES modules、IndexedDB、WebGL。
+
+移动端：Android Chrome（推荐安装 PWA）、iOS Safari（支持 standalone 模式）。
+
+## 许可证
 
 MIT
