@@ -35,6 +35,8 @@
         </div>
         <div class="dropdown-divider"></div>
         <button id="btn-export" class="dropdown-btn">导出数据</button>
+        <button id="btn-import" class="dropdown-btn">导入数据</button>
+        <input type="file" id="import-file" accept=".json" hidden>
         <button id="btn-overview" class="dropdown-btn">地点总览</button>
         <button id="btn-reset-view" class="dropdown-btn">重置视角</button>
       </div>
@@ -102,7 +104,7 @@
         <span id="detail-date" class="detail-date"></span>
       </div>
       <div class="detail-stars" id="detail-stars"></div>
-      <div class="detail-photos" id="detail-photos">
+      <div class="detail-photos">
         <div class="photo-grid" id="photo-grid"></div>
         <button id="btn-add-photo" class="btn-text">+ 添加照片</button>
         <input type="file" id="photo-input" accept="image/*" multiple hidden>
@@ -133,10 +135,12 @@
     <div class="modal-backdrop"></div>
     <div class="photo-viewer-content">
       <button class="btn-close btn-close-light">&times;</button>
+      <button id="photo-prev" class="photo-nav-btn photo-prev">&lsaquo;</button>
+      <button id="photo-next" class="photo-nav-btn photo-next">&rsaquo;</button>
+      <span id="photo-index" class="photo-index"></span>
       <img id="photo-viewer-img" src="" alt="照片">
-      <div style="margin-top:10px;">
-        <input type="text" id="photo-caption" placeholder="添加说明文字..." autocomplete="off"
-          style="width:100%;background:rgba(255,255,255,0.04);border:1px solid #333;border-radius:6px;padding:10px 14px;color:#ccc;font-size:14px;outline:none;">
+      <div class="photo-caption-wrap">
+        <input type="text" id="photo-caption" placeholder="添加说明文字..." autocomplete="off">
       </div>
     </div>
   </div>

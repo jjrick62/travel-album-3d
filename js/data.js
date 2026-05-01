@@ -80,7 +80,7 @@ export async function exportAllData() {
   return { exportTime: new Date().toISOString(), theme, home, places };
 }
 
-async function importAllData(data) {
+export async function importAllData(data) {
   if (data.theme) await setMeta('theme', data.theme);
   if (data.home) await setMeta('home', data.home);
   if (data.places) {
@@ -93,9 +93,7 @@ async function importAllData(data) {
 
 // ===== 初始化 =====
 
-let dbReady = false;
 export async function initDB() {
   await openDB();
-  dbReady = true;
   return { theme: await getMeta('theme', '#ff6b6b'), home: await getMeta('home', null) };
 }

@@ -1,6 +1,6 @@
 // ===== 主入口 =====
 
-import { initDB, setMeta, getAllPlaces, savePlace, deletePlace, exportAllData } from './data.js';
+import { initDB, setMeta, getAllPlaces, savePlace, deletePlace, exportAllData, importAllData } from './data.js';
 import { Earth } from './earth.js';
 
 // 触摸设备检测
@@ -35,7 +35,6 @@ async function init() {
   // 初始化地球
   earth = new Earth(document.getElementById('globe-container'));
   earth.onPlaceClick = (id) => showDetail(id);
-  earth.onMissClick = () => {}; // 改由全局处理
   earth._onDataReady = () => { refreshEarth(); };
 
   // 手机/平板/桌面三档摄像机初始距离
@@ -658,21 +657,37 @@ function renderModalPhotos() {
   }
 }
 
+let _pvPlace = null;
+let _pvIndex = 0;
+
 function openPhotoViewer(photo, place) {
+  _pvPlace = place;
+  _pvIndex = place.photos ? place.photos.indexOf(photo) : 0;
+  if (_pvIndex < 0) _pvIndex = 0;
+  _renderPhotoViewer();
+
   const viewer = document.getElementById('photo-viewer');
   viewer.classList.remove('hidden');
+}
+
+function _renderPhotoViewer() {
+  const photos = _pvPlace?.photos || [];
+  const photo = photos[_pvIndex];
+  if (!photo) return;
+
   document.getElementById('photo-viewer-img').src = photo.dataUrl;
+  document.getElementById('photo-caption').value = photo.caption || '';
+  document.getElementById('photo-index').textContent = photos.length > 1 ? `${_pvIndex + 1} / ${photos.length}` : '';
 
-  const captionInput = document.getElementById('photo-caption');
-  captionInput.value = photo.caption || '';
-  captionInput.oninput = async () => {
-    photo.caption = captionInput.value;
-    await savePlace(place);
-    renderPhotos(place);
-  };
+  document.getElementById('photo-prev').style.display = photos.length > 1 ? '' : 'none';
+  document.getElementById('photo-next').style.display = photos.length > 1 ? '' : 'none';
+}
 
-  viewer.querySelector('.btn-close').onclick = () => viewer.classList.add('hidden');
-  viewer.querySelector('.modal-backdrop').addEventListener('click', () => viewer.classList.add('hidden'));
+function _navigatePhoto(delta) {
+  const photos = _pvPlace?.photos || [];
+  if (photos.length === 0) return;
+  _pvIndex = (_pvIndex + delta + photos.length) % photos.length;
+  _renderPhotoViewer();
 }
 
 // ===== 刷新地球 =====
@@ -921,6 +936,42 @@ function bindEvents() {
     settingsBtn.classList.remove('active');
   });
 
+  // 导入数据
+  const importInput = document.getElementById('import-file');
+  document.getElementById('btn-import').addEventListener('click', () => {
+    dropdown.classList.add('hidden');
+    settingsBtn.classList.remove('active');
+    importInput.click();
+  });
+  importInput.addEventListener('change', async () => {
+    const file = importInput.files[0];
+    if (!file) return;
+    try {
+      const text = await file.text();
+      const data = JSON.parse(text);
+      if (!data.places && !data.home && !data.theme) {
+        alert('无效的备份文件');
+        return;
+      }
+      if (!confirm(`将导入 ${data.places?.length || 0} 个地点，覆盖现有数据？`)) return;
+      await importAllData(data);
+      places = await getAllPlaces();
+      homeLocation = (await initDB()).home || null;
+      updateStats();
+      refreshEarth();
+      if (homeLocation) {
+        document.getElementById('home-name').textContent = homeLocation.name;
+        document.getElementById('home-display').classList.remove('hidden');
+      } else {
+        document.getElementById('home-display').classList.add('hidden');
+      }
+      alert('导入完成');
+    } catch (err) {
+      alert('导入失败：' + err.message);
+    }
+    importInput.value = '';
+  });
+
   // 地点总览
   document.getElementById('btn-overview').addEventListener('click', () => {
     dropdown.classList.add('hidden');
@@ -936,30 +987,25 @@ function bindEvents() {
     settingsBtn.classList.remove('active');
   });
 
-  // 点击空白关闭下拉菜单
+  // 全局点击统一处理
   document.addEventListener('click', (e) => {
+    // 关闭下拉菜单
     if (!e.target.closest('#btn-settings') && !e.target.closest('#settings-dropdown')) {
       dropdown.classList.add('hidden');
       settingsBtn.classList.remove('active');
     }
-  });
 
-  // 点击空白关闭详情（canvas 点击由地球自己处理，不关）
-  document.addEventListener('click', (e) => {
+    // 关闭详情卡片
     const card = document.getElementById('detail-card');
-    if (card.classList.contains('hidden')) return;
-    if (e.target.tagName === 'CANVAS') return;
-    if (!card.contains(e.target) && !e.target.closest('.modal')) {
+    if (!card.classList.contains('hidden') && e.target.tagName !== 'CANVAS' && !card.contains(e.target) && !e.target.closest('.modal')) {
       card.classList.add('hidden');
       selectedPlaceId = null;
     }
-  });
 
-  // 全局：点击非卡片区域回退视角
-  document.addEventListener('click', (e) => {
-    if (e.target.closest('.place-card') || e.target.closest('.place-card-badge')) return;
-    if (e.target.closest('.modal') || e.target.closest('.dropdown')) return;
-    if (earth._focusedPlaceId) earth.resetView();
+    // 非卡片/非弹窗区域：回退视角
+    if (!e.target.closest('.place-card') && !e.target.closest('.place-card-badge') && !e.target.closest('.modal') && !e.target.closest('.dropdown') && !e.target.closest('.overview-content') && earth._focusedPlaceId) {
+      earth.resetView();
+    }
   });
 
   // 关闭详情
@@ -974,6 +1020,34 @@ function bindEvents() {
   });
   document.getElementById('overview-modal').querySelector('.modal-backdrop').addEventListener('click', () => {
     document.getElementById('overview-modal').classList.add('hidden');
+  });
+
+  // 照片查看器：关闭、翻页、caption 保存、键盘
+  const photoViewer = document.getElementById('photo-viewer');
+  const closePV = () => {
+    const captionInput = document.getElementById('photo-caption');
+    const photos = _pvPlace?.photos || [];
+    const photo = photos[_pvIndex];
+    if (photo && captionInput.value !== (photo.caption || '')) {
+      photo.caption = captionInput.value;
+      savePlace(_pvPlace).then(() => {
+        renderPhotos(_pvPlace);
+        syncPlaceCards();
+      });
+    }
+    photoViewer.classList.add('hidden');
+  };
+  photoViewer.querySelector('.btn-close').addEventListener('click', closePV);
+  photoViewer.querySelector('.modal-backdrop').addEventListener('click', closePV);
+
+  document.getElementById('photo-prev').addEventListener('click', (e) => { e.stopPropagation(); _navigatePhoto(-1); });
+  document.getElementById('photo-next').addEventListener('click', (e) => { e.stopPropagation(); _navigatePhoto(1); });
+
+  document.addEventListener('keydown', (e) => {
+    if (photoViewer.classList.contains('hidden')) return;
+    if (e.key === 'ArrowLeft') _navigatePhoto(-1);
+    else if (e.key === 'ArrowRight') _navigatePhoto(1);
+    else if (e.key === 'Escape') closePV();
   });
 }
 

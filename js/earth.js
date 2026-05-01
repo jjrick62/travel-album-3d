@@ -111,12 +111,10 @@ export class Earth {
           size: 1.2,
           opacity: 0.8,
         }, 'borderPoints', true);
-        console.log(`[Earth] borders loaded`);
       }
 
-      console.log(`[Earth] coastline loaded`);
     } catch (err) {
-      console.warn('Map data load failed:', err);
+        console.warn('Map data load failed, retrying:', err);
     }
 
   }
@@ -186,7 +184,6 @@ export class Earth {
       mesh.material.opacity = 0;
       this.fadingItems.push({ mesh, target: style.opacity });
     }
-    console.log(`[Earth] ${propName}: ${pts.length / 3} pts`);
   }
 
   clearCoastlines() {
@@ -269,7 +266,6 @@ export class Earth {
 
       this._createHomeFill();
       if (this._onDataReady) this._onDataReady();
-      console.log(`[Earth] admin1 loaded: ${chinaF.length} China + ${foreignF.length} foreign`);
     } catch (err) {
       console.warn('Admin1 load failed:', err);
     }
@@ -289,7 +285,6 @@ export class Earth {
       }, 'cityPoints', true, 2);
       if (this._onDataReady) this._onDataReady();
       this._createHomeFill();
-      console.log(`[Earth] cities loaded`);
     } catch (err) {
       console.warn('Cities load failed:', err);
     }
@@ -310,7 +305,6 @@ export class Earth {
         opacity: 0.25,
       }, 'districtPoints', true, 4);
       this._createHomeFill();
-      console.log(`[Earth] districts loaded`);
     } catch (err) {
       console.warn('Districts load failed:', err);
     }
@@ -443,12 +437,11 @@ export class Earth {
     const geo = new THREE.BufferGeometry();
     geo.setAttribute('position', new THREE.Float32BufferAttribute(pts, 3));
     const mat = new THREE.PointsMaterial({
-      color: 0xffffff, size: 1.2, transparent: true, opacity: 0.35,
-      blending: THREE.AdditiveBlending, depthWrite: false, sizeAttenuation: false,
+      color: 0xffffff, size: 0.012, transparent: true, opacity: 0.75,
+      blending: THREE.AdditiveBlending, depthWrite: false, sizeAttenuation: true,
     });
     this._homeFill = new THREE.Points(geo, mat);
     this.earthGroup.add(this._homeFill);
-    this._sizedPoints.push({ mesh: this._homeFill, baseSize: 1.2 });
   }
 
   // ===== 多边形内点判断（射线法） =====
@@ -526,9 +519,7 @@ export class Earth {
     dot.scale.setScalar(baseScale);
     dot.userData = { placeId: place.id };
     this.earthGroup.add(dot);
-    if (!this._placeDots) this._placeDots = [];
     this._placeDots.push(dot);
-    if (!this._placeSprites) this._placeSprites = [];
     this._placeSprites.push({ sprite: dot, base: baseScale });
 
     // 查找匹配的行政区特征，预生成填充粒子
@@ -566,14 +557,16 @@ export class Earth {
     }
 
     if (feature) {
-      const density = fillLevel === 'province' ? 0.002 : 0.004;
+      const density = fillLevel === 'province' ? 0.006 : 0.008;
       const pts = this._fillFeature(feature, density);
       if (pts && pts.length > 0) {
         const geo = new THREE.BufferGeometry();
         geo.setAttribute('position', new THREE.Float32BufferAttribute(pts, 3));
+        const warmth = 0.65 + r / 5 * 0.35;
+        const fillColor = new THREE.Color(1.0, 0.95 * warmth, 0.85 * warmth);
         const mat = new THREE.PointsMaterial({
-          color: 0xffffff,
-          size: 0.012,
+          color: fillColor,
+          size: 0.018,
           transparent: true,
           opacity: 0,
           blending: THREE.AdditiveBlending,
@@ -586,11 +579,7 @@ export class Earth {
       }
     }
 
-    if (!this._placeFills) this._placeFills = [];
     this._placeFills.push({ mesh: fillMesh, level: fillLevel, opacity: 0 });
-
-    // 存储以便清除
-    if (!this.visitedClusters) this.visitedClusters = [];
     this.visitedClusters.push(dot);
     if (fillMesh) this.visitedClusters.push(fillMesh);
 
@@ -775,8 +764,6 @@ export class Earth {
       if (hits.length > 0) {
         const id = hits[0].object.userData.placeId;
         if (id && this.onPlaceClick) this.onPlaceClick(id);
-      } else if (this.onMissClick) {
-        this.onMissClick();
       }
     });
 
@@ -909,12 +896,9 @@ export class Earth {
       }
     }
 
-    // 海岸线常亮 —— 等淡入完成后保持恒定
+    // 海岸线常亮 —— 淡入完成后开始，或 8 秒后强制开始
     if (this.coastlinePoints) {
-      if (!this._breathStartTime && this.fadingItems.length === 0) {
-        this._breathStartTime = performance.now();
-      }
-      if (!this._breathStartTime && performance.now() > 8000) {
+      if (!this._breathStartTime && (this.fadingItems.length === 0 || performance.now() > 8000)) {
         this._breathStartTime = performance.now();
       }
       if (this._breathStartTime) {
@@ -953,7 +937,6 @@ export class Earth {
         if (this._borderOpacity === undefined) this._borderOpacity = target;
         this._borderOpacity += (target - this._borderOpacity) * 0.08;
         if (Math.abs(this._borderOpacity - target) < 0.001) this._borderOpacity = target;
-        this.borderPoints.material.opacity = this._borderOpacity;
       }
     }
 
@@ -995,23 +978,20 @@ export class Earth {
         this.districtPoints.material.opacity = breathe(this._distOpacity || 0, 1.2);
     }
 
-    // 深度遮挡球：始终激活，区分地球正背面
-    if (this._occluder) {
-      this._occluder.scale.setScalar(1);
-      this._occluder.material.depthWrite = true;
-    }
-
-    // 地点填充粒子 —— 放大到对应行政级别才点亮（精度：县>市>省，距地心判定）
+    // 地点填充粒子 —— 透明度绑定同级轮廓线，高亮时叠加呼吸
     for (const pf of this._placeFills) {
       if (!pf.mesh) continue;
-      let threshold;
-      if (pf.level === 'district') threshold = 2.0;
-      else if (pf.level === 'city') threshold = 2.2;
-      else if (pf.level === 'province') threshold = 2.8;
+      let base;
+      if (pf.level === 'district') base = this._distOpacity || 0;
+      else if (pf.level === 'city') base = this._cityOpacity || 0;
+      else if (pf.level === 'province') base = this._chinaAdminOpacity || 0;
       else { pf.mesh.material.opacity = 0; continue; }
-      const target = distFromCenter < threshold ? 0.75 : 0;
-      pf.opacity += (target - pf.opacity) * 0.06;
-      pf.mesh.material.opacity = pf.opacity;
+      let opacity = base * 0.55;
+      if (pf.mesh.userData.placeId === this._highlightedId) {
+        const breathe = 0.3 + 0.45 * Math.sin(performance.now() * 0.003);
+        opacity = Math.max(opacity, breathe);
+      }
+      pf.mesh.material.opacity = opacity;
     }
 
     // 流星触发（间隔拉长，约 10~16 秒一次）
@@ -1077,17 +1057,6 @@ export class Earth {
           const cb = this._flyOnArrive;
           this._flyOnArrive = null;
           cb();
-        }
-      }
-    }
-
-    // 高亮填区呼吸
-    if (this._highlightedId) {
-      for (const pf of this._placeFills) {
-        if (pf.mesh && pf.mesh.userData.placeId === this._highlightedId) {
-          const breathe = 0.3 + 0.45 * Math.sin(performance.now() * 0.003);
-          pf.mesh.material.opacity = Math.max(pf.mesh.material.opacity || 0, breathe);
-          break;
         }
       }
     }
