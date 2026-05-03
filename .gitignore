@@ -13,3 +13,9 @@ data/map/fetch_*.js
 # 旧版地图数据（已迁移到 china_*.geojson）
 data/map/admin1.geojson
 data/map/admin1_world.json
+
+# 后端
+backend/travel_album.db
+backend/uploads/
+__pycache__/
+*.pyc

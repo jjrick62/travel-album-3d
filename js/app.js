@@ -1,6 +1,7 @@
 // ===== 主入口 =====
 
-import { initDB, setMeta, getAllPlaces, savePlace, deletePlace, exportAllData, importAllData } from './data.js';
+import './logger.js';
+import { initDB, setMeta, getMeta, getAllPlaces, savePlace, deletePlace, exportAllData, importAllData, login, register, logout, isLoggedIn, uploadPhoto, deletePhoto } from './api.js';
 import { Earth } from './earth.js';
 
 // 触摸设备检测
@@ -22,11 +23,24 @@ let tempPhotos = [];
 const $ = (id) => document.getElementById(id);
 
 // ===== 初始化 =====
-async function init() { 
+async function init() {
   // 加载城市数据
   const resp = await fetch('data/cities.json');
   citiesData = await resp.json();
 
+  // 先绑定认证事件（不依赖登录状态）
+  bindAuthEvents();
+
+  // 检查登录状态
+  if (!isLoggedIn()) {
+    showAuthModal();
+    return;
+  }
+
+  await doInit();
+}
+
+async function doInit() {
   // 初始化数据库
   const meta = await initDB();
   homeLocation = meta.home || null;
@@ -37,13 +51,13 @@ async function init() {
   earth.onPlaceClick = (id) => showDetail(id);
   earth._onDataReady = () => { refreshEarth(); };
 
-  // 手机/平板/桌面三档摄像机初始距离
-  const w = window.innerWidth;
-  if (w <= 480) {
-    earth.camera.position.set(0, 2.8, 6.0);
-  } else if (w <= 768) {
-    earth.camera.position.set(0, 2.0, 5.2);
-  }
+  // 根据屏幕宽高比连续调整初始摄像机高度
+  // 窄屏（手机竖屏）→ 更高更远俯视；宽屏（桌面）→ 更低更近
+  const aspect = window.innerWidth / window.innerHeight;
+  const t = Math.max(0, Math.min(1, (1.6 - aspect) / 1.2));
+  const camY = 1.5 + t * 2.0;
+  const camZ = 3.5 + t * 2.0;
+  earth.camera.position.set(0, camY, camZ);
 
   // 先加载已有地点数据，再启动（地图数据异步加载，不阻塞）
   applyEarthData();
@@ -612,27 +626,19 @@ function renderPhotos(place) {
     const files = Array.from(e.target.files);
     if (!place.photos) place.photos = [];
     for (const file of files) {
-      const dataUrl = await fileToDataUrl(file);
-      place.photos.push({
-        id: crypto.randomUUID(),
-        dataUrl,
-        caption: ''
-      });
+      try {
+        const photo = await uploadPhoto(place.id, file);
+        place.photos.push(photo);
+      } catch (err) {
+        alert('照片上传失败: ' + err.message);
+      }
     }
-    await savePlace(place);
     renderPhotos(place);
     syncPlaceCards();
     fileInput.value = '';
   };
 }
 
-function fileToDataUrl(file) {
-  return new Promise((resolve) => {
-    const reader = new FileReader();
-    reader.onload = () => resolve(reader.result);
-    reader.readAsDataURL(file);
-  });
-}
 
 function renderModalPhotos() {
   const grid = document.getElementById('modal-photo-grid');
@@ -821,6 +827,9 @@ function bindEvents() {
       }
     }
 
+    const newPhotos = tempPhotos.filter(p => p._new);
+    const existingPhotos = tempPhotos.filter(p => !p._new).map(p => ({ id: p.id, dataUrl: p.dataUrl, caption: p.caption }));
+
     if (isEditing && selectedPlaceId) {
       // 编辑模式
       const place = places.find(p => p.id === selectedPlaceId);
@@ -832,8 +841,15 @@ function bindEvents() {
       place.rating = addRating;
       place.notes = document.getElementById('place-notes').value;
       place.visitDate = document.getElementById('visit-date').value;
-      place.photos = tempPhotos.slice();
+      place.photos = existingPhotos;
       await savePlace(place);
+      // 上传新照片
+      for (const p of newPhotos) {
+        try {
+          const uploaded = await uploadPhoto(place.id, p.file);
+          place.photos.push(uploaded);
+        } catch (err) { console.warn('Photo upload failed:', err); }
+      }
       places = await getAllPlaces();
       document.getElementById('add-modal').classList.add('hidden');
       isEditing = false;
@@ -844,7 +860,7 @@ function bindEvents() {
       return;
     }
 
-        // 新建模式
+    // 新建模式
     try {
     const newPlace = {
       id: crypto.randomUUID(),
@@ -855,10 +871,17 @@ function bindEvents() {
       rating: addRating || 3,
       notes: document.getElementById('place-notes').value,
       visitDate: document.getElementById('visit-date').value,
-      photos: tempPhotos.slice()
+      photos: existingPhotos
     };
 
     await savePlace(newPlace);
+    // 上传新照片
+    for (const p of newPhotos) {
+      try {
+        const uploaded = await uploadPhoto(newPlace.id, p.file);
+        newPlace.photos.push(uploaded);
+      } catch (err) { console.warn('Photo upload failed:', err); }
+    }
     places = await getAllPlaces();
     document.getElementById('add-modal').classList.add('hidden');
     updateStats();
@@ -871,7 +894,10 @@ function bindEvents() {
     syncPlaceCards();
     earth.zoomOutFromPlace(newPlace.lat, newPlace.lng);
 
-    showDetail(newPlace.id);
+    // 从最新数据获取完整地点
+    places = await getAllPlaces();
+    const saved = places.find(p => p.id === newPlace.id);
+    if (saved) showDetail(saved.id);
     } catch (err) {
       console.error('Save failed:', err);
       alert('保存失败：' + err.message);
@@ -885,8 +911,13 @@ function bindEvents() {
   document.getElementById('modal-photo-input').addEventListener('change', async (e) => {
     const files = Array.from(e.target.files);
     for (const file of files) {
-      const dataUrl = await fileToDataUrl(file);
-      tempPhotos.push({ id: crypto.randomUUID(), dataUrl, caption: '' });
+      tempPhotos.push({
+        id: crypto.randomUUID(),
+        file: file,
+        dataUrl: URL.createObjectURL(file), // 预览用 blob URL
+        caption: '',
+        _new: true, // 标记为新增，保存时需要上传
+      });
     }
     renderModalPhotos();
     e.target.value = '';
@@ -989,21 +1020,29 @@ function bindEvents() {
 
   // 全局点击统一处理
   document.addEventListener('click', (e) => {
+    const hitCard = e.target.closest('.place-card');
+    const hitModal = e.target.closest('.modal');
+    const hitDropdown = e.target.closest('.dropdown') || e.target.closest('#btn-settings');
+    const hitOverview = e.target.closest('.overview-content');
+    const hitDetail = e.target.closest('#detail-card');
+    const hitHeaderBtn = e.target.closest('header button, header input');
+    const isInteractive = hitCard || hitModal || hitDropdown || hitOverview || hitDetail || hitHeaderBtn || e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA';
+
     // 关闭下拉菜单
-    if (!e.target.closest('#btn-settings') && !e.target.closest('#settings-dropdown')) {
+    if (!hitDropdown) {
       dropdown.classList.add('hidden');
       settingsBtn.classList.remove('active');
     }
 
     // 关闭详情卡片
     const card = document.getElementById('detail-card');
-    if (!card.classList.contains('hidden') && e.target.tagName !== 'CANVAS' && !card.contains(e.target) && !e.target.closest('.modal')) {
+    if (!card.classList.contains('hidden') && !hitDetail && !hitModal) {
       card.classList.add('hidden');
       selectedPlaceId = null;
     }
 
-    // 非卡片/非弹窗区域：回退视角
-    if (!e.target.closest('.place-card') && !e.target.closest('.place-card-badge') && !e.target.closest('.modal') && !e.target.closest('.dropdown') && !e.target.closest('.overview-content') && earth._focusedPlaceId) {
+    // 非交互区域：回退视角（聚焦某地点时点击空白即拉回全景）
+    if (!isInteractive && earth._focusedPlaceId) {
       earth.resetView();
     }
   });
@@ -1049,6 +1088,78 @@ function bindEvents() {
     else if (e.key === 'ArrowRight') _navigatePhoto(1);
     else if (e.key === 'Escape') closePV();
   });
+
+  // 退出登录
+  document.getElementById('btn-logout').addEventListener('click', () => {
+    dropdown.classList.add('hidden');
+    settingsBtn.classList.remove('active');
+    if (confirm('确定退出登录？')) {
+      logout();
+      location.reload();
+    }
+  });
+
+}
+
+// ===== 认证 =====
+function bindAuthEvents() {
+  document.getElementById('btn-auth-submit').addEventListener('click', handleAuthSubmit);
+  document.getElementById('btn-auth-switch').addEventListener('click', handleAuthSwitch);
+  document.getElementById('btn-auth-close').addEventListener('click', hideAuthModal);
+  document.getElementById('auth-modal').querySelector('.modal-backdrop').addEventListener('click', hideAuthModal);
+  document.getElementById('auth-password').addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') handleAuthSubmit();
+  });
+}
+
+let _authMode = 'login'; // 'login' | 'register'
+
+function showAuthModal() {
+  _authMode = 'login';
+  document.getElementById('auth-title').textContent = '登录';
+  document.getElementById('btn-auth-submit').textContent = '登录';
+  document.getElementById('btn-auth-switch').textContent = '没有账号？注册';
+  document.getElementById('auth-error').style.display = 'none';
+  document.getElementById('auth-email').value = '';
+  document.getElementById('auth-password').value = '';
+  document.getElementById('auth-modal').classList.remove('hidden');
+}
+
+function hideAuthModal() {
+  document.getElementById('auth-modal').classList.add('hidden');
+}
+
+function handleAuthSwitch() {
+  _authMode = _authMode === 'login' ? 'register' : 'login';
+  document.getElementById('auth-title').textContent = _authMode === 'login' ? '登录' : '注册';
+  document.getElementById('btn-auth-submit').textContent = _authMode === 'login' ? '登录' : '注册';
+  document.getElementById('btn-auth-switch').textContent = _authMode === 'login' ? '没有账号？注册' : '已有账号？登录';
+  document.getElementById('auth-error').style.display = 'none';
+}
+
+async function handleAuthSubmit() {
+  const email = document.getElementById('auth-email').value.trim();
+  const password = document.getElementById('auth-password').value;
+  const errEl = document.getElementById('auth-error');
+
+  if (!email || !password || password.length < 6) {
+    errEl.textContent = '请输入有效邮箱和至少6位密码';
+    errEl.style.display = '';
+    return;
+  }
+
+  try {
+    if (_authMode === 'login') {
+      await login(email, password);
+    } else {
+      await register(email, password);
+    }
+    hideAuthModal();
+    await doInit();
+  } catch (err) {
+    errEl.textContent = err.message || '操作失败';
+    errEl.style.display = '';
+  }
 }
 
 // ===== 地点总览列表 =====

@@ -1,0 +1,182 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<title>数据迁移</title>
+<style>
+  body { font-family: -apple-system, sans-serif; background: #111; color: #ccc; padding: 2rem; }
+  h1 { color: #0f0; }
+  .step { margin: 1rem 0; padding: 1rem; background: #1a1a1a; border-radius: 0.5rem; }
+  button { padding: 0.5rem 1rem; cursor: pointer; border-radius: 0.25rem; border: 1px solid #555; background: #333; color: #fff; }
+  button:hover { background: #555; }
+  #log { margin-top: 1rem; padding: 1rem; background: #0a0a0a; border-radius: 0.5rem; max-height: 20rem; overflow-y: auto; font-size: 0.8rem; }
+  .err { color: #e55; }
+  .ok { color: #0a0; }
+  input { width: 100%; padding: 0.5rem; background: #000; border: 1px solid #333; color: #ccc; border-radius: 0.25rem; margin: 0.25rem 0; }
+</style>
+</head>
+<body>
+<h1>IndexedDB → 后端 数据迁移</h1>
+
+<div class="step">
+  <h3>第1步：填写后端地址和登录信息</h3>
+  <label>后端 API 地址</label>
+  <input id="api-base" value="http://localhost:8000" placeholder="http://localhost:8000">
+  <label>邮箱</label>
+  <input id="email" placeholder="your@email.com">
+  <label>密码</label>
+  <input id="password" type="password" placeholder="至少6位">
+  <br><br>
+  <button id="btn-login">登录 / 注册</button>
+  <span id="login-status"></span>
+</div>
+
+<div class="step">
+  <h3>第2步：读取旧数据</h3>
+  <button id="btn-read">读取 IndexedDB</button>
+  <span id="read-status"></span>
+</div>
+
+<div class="step">
+  <h3>第3步：迁移到后端</h3>
+  <button id="btn-migrate" disabled>开始迁移</button>
+  <span id="migrate-status"></span>
+</div>
+
+<div id="log"></div>
+
+<script type="module">
+import { initDB, getAllPlaces, exportAllData } from './js/data.js';
+
+const $ = id => document.getElementById(id);
+let token = null;
+let oldData = null;
+
+function log(msg, cls = '') {
+  const div = document.createElement('div');
+  div.className = cls;
+  div.textContent = `[${new Date().toLocaleTimeString()}] ${msg}`;
+  $('log').appendChild(div);
+  div.scrollIntoView();
+}
+
+$('btn-login').addEventListener('click', async () => {
+  const base = $('api-base').value.trim();
+  const email = $('email').value.trim();
+  const password = $('password').value;
+  if (!base || !email || !password) { log('请填写后端地址、邮箱和密码', 'err'); return; }
+
+  log('正在登录...');
+  try {
+    let resp = await fetch(`${base}/api/auth/login`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email, password })
+    });
+    if (!resp.ok) {
+      log('账号不存在，尝试注册...');
+      resp = await fetch(`${base}/api/auth/register`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email, password })
+      });
+    }
+    const data = await resp.json();
+    token = data.access_token;
+    $('login-status').textContent = '✓ 已登录';
+    log('登录成功', 'ok');
+  } catch (err) {
+    log('登录失败: ' + err.message, 'err');
+  }
+});
+
+$('btn-read').addEventListener('click', async () => {
+  log('正在读取 IndexedDB...');
+  try {
+    await initDB();
+    oldData = await exportAllData();
+    const placeCount = oldData.places?.length || 0;
+    const photoCount = oldData.places?.reduce((s, p) => s + (p.photos?.length || 0), 0) || 0;
+    $('read-status').textContent = `✓ ${placeCount} 个地点，${photoCount} 张照片`;
+    log(`读取到 ${placeCount} 个地点，${photoCount} 张照片`, 'ok');
+    $('btn-migrate').disabled = false;
+  } catch (err) {
+    log('读取失败: ' + err.message, 'err');
+  }
+});
+
+$('btn-migrate').addEventListener('click', async () => {
+  if (!token) { log('请先登录', 'err'); return; }
+  if (!oldData) { log('请先读取数据', 'err'); return; }
+
+  const base = $('api-base').value.trim();
+  const places = oldData.places || [];
+
+  log(`开始迁移 ${places.length} 个地点...`);
+
+  // 先设置 meta
+  if (oldData.home) {
+    try {
+      await fetch(`${base}/api/meta`, {
+        method: 'PUT', headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ home: oldData.home, theme: oldData.theme })
+      });
+      log('常驻地已迁移', 'ok');
+    } catch (e) { log('常驻地迁移失败: ' + e.message, 'err'); }
+  }
+
+  let done = 0;
+  for (const place of places) {
+    try {
+      // 创建地点（不带照片）
+      const body = {
+        name: place.name,
+        full_name: place.fullName || place.name,
+        lat: place.lat,
+        lng: place.lng,
+        rating: place.rating || 3,
+        notes: place.notes || '',
+        visit_date: place.visitDate || '',
+      };
+      const resp = await fetch(`${base}/api/places`, {
+        method: 'POST', headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify(body)
+      });
+      if (!resp.ok) throw new Error(await resp.text());
+      const created = await resp.json();
+      const placeId = created.id;
+
+      // 迁移照片（base64 → 上传文件）
+      if (place.photos && place.photos.length > 0) {
+        for (const photo of place.photos) {
+          try {
+            const base64 = photo.dataUrl;
+            if (!base64 || !base64.startsWith('data:')) continue;
+            const mime = base64.match(/data:(.*?);/)?.[1] || 'image/jpeg';
+            const byteStr = atob(base64.split(',')[1]);
+            const bytes = new Uint8Array(byteStr.length);
+            for (let i = 0; i < byteStr.length; i++) bytes[i] = byteStr.charCodeAt(i);
+            const blob = new Blob([bytes], { type: mime });
+            const form = new FormData();
+            form.append('file', blob, `photo.${mime.split('/')[1] || 'jpg'}`);
+            form.append('caption', photo.caption || '');
+            await fetch(`${base}/api/photos/places/${placeId}`, {
+              method: 'POST', headers: { Authorization: `Bearer ${token}` },
+              body: form
+            });
+            log(`  ✓ ${place.name}: 照片迁移成功`, 'ok');
+          } catch (e) {
+            log(`  ✗ ${place.name}: 照片失败 - ${e.message}`, 'err');
+          }
+        }
+      }
+      done++;
+      $('migrate-status').textContent = `${done} / ${places.length}`;
+    } catch (err) {
+      log(`${place.name} 迁移失败: ${err.message}`, 'err');
+    }
+  }
+  log(`迁移完成！共 ${done} / ${places.length} 个地点`, 'ok');
+  $('migrate-status').textContent = `✓ 完成 ${done} / ${places.length}`;
+});
+</script>
+</body>
+</html>

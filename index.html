@@ -39,9 +39,37 @@
         <input type="file" id="import-file" accept=".json" hidden>
         <button id="btn-overview" class="dropdown-btn">地点总览</button>
         <button id="btn-reset-view" class="dropdown-btn">重置视角</button>
+        <div class="dropdown-divider"></div>
+        <button id="btn-logout" class="dropdown-btn" style="color:#e55">退出登录</button>
       </div>
     </div>
   </header>
+
+  <!-- 登录/注册浮层 -->
+  <div id="auth-modal" class="modal hidden">
+    <div class="modal-backdrop"></div>
+    <div class="modal-content" style="max-width:24rem">
+      <div class="modal-header">
+        <h2 id="auth-title">登录</h2>
+        <button class="btn-close" id="btn-auth-close">&times;</button>
+      </div>
+      <div class="modal-body">
+        <div class="form-group">
+          <label for="auth-email">邮箱</label>
+          <input type="email" id="auth-email" placeholder="your@email.com" autocomplete="email">
+        </div>
+        <div class="form-group">
+          <label for="auth-password">密码</label>
+          <input type="password" id="auth-password" placeholder="至少6位" autocomplete="current-password">
+        </div>
+        <div id="auth-error" style="color:#e55;font-size:0.75rem;margin-bottom:0.5rem;display:none"></div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn-text" id="btn-auth-switch" style="margin-right:auto">没有账号？注册</button>
+        <button class="btn-primary" id="btn-auth-submit">登录</button>
+      </div>
+    </div>
+  </div>
 
   <!-- 添加地点浮层 -->
   <div id="add-modal" class="modal hidden">
