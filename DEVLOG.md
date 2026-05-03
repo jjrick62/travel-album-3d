@@ -1,5 +1,48 @@
 # Colorful · Meridian — 开发日志
 
+## 2026-05-02 ~ 05-04 — 后端化 + 工程质量体系
+
+### 后端搭建
+
+- **FastAPI + SQLite + JWT 认证**，完整的 RESTful API
+- 数据模型：User / Place / Photo / UserMeta 四张表
+- 照片从 base64 浏览器存储迁移到服务器文件系统
+- 前端 `js/api.js` 替代 `js/data.js`（接口签名兼容，内部从 IndexedDB 切为 HTTP fetch）
+- 登录/注册 UI + 认证状态管理
+
+### 双分支架构
+
+- `static` 分支：纯前端 IndexedDB，GitHub Pages 部署
+- `master` 分支：前后端分离，本地开发
+- 顶级域名 `jjrick62.github.io` 直连静态版
+
+### 前端体验优化
+
+- 摄像机高度按屏幕宽高比连续自适应（窄屏俯视、宽屏平视）
+- 聚焦地点后拖拽自动切 target 回地心 + 取消飞行
+- 全局点击空白区域回拉视角
+- 首次访问自动预置上海市示例地点
+
+### 工程质量体系
+
+- ESLint + EditorConfig + package.json，`npm run check` 一键验证
+- `js/utils.js` 提取公共工具（星星渲染、平均分计算）
+- 死代码清理：移除未用变量、import、重复逻辑
+- 代码审计框架：五大维度（质量/模块化/错误处理/配置/一致性），跨项目复用
+- 全局工作流铁律：改前搜引用 → 改后即验证 → 改前报影响 → 时序先标注
+- `claude_memory/` 项目专属上下文目录
+
+### 调试工具
+
+- `js/logger.js` 全量点击日志（捕获阶段拦截，F12 console 实时输出）
+- `logEvents()` / `logClear()` / `logExport()` 控制台命令
+
+### 项目规划
+
+- `ROADMAP.md` 11 个优化方向（飞线动画、热力图、PWA、分享卡片等），基于同类项目调研
+
+---
+
 ## 2026-05-01 — 全面重构日
 
 ### 响应式 & 触摸适配
