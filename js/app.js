@@ -33,6 +33,26 @@ async function init() {
   homeLocation = meta.home || null;
   places = await getAllPlaces();
 
+  // 首次访问空库时预置示例地点
+  if (places.length === 0) {
+    const demoPlace = {
+      id: crypto.randomUUID(),
+      name: '上海市',
+      fullName: '上海市·上海市',
+      lat: 31.2304,
+      lng: 121.4737,
+      rating: 4,
+      notes: '外滩的夜景令人流连忘返，东方明珠与陆家嘴的摩天大楼在黄浦江两岸交相辉映。\n\n这里是旅程的第一站——点击右上角 + 号添加更多地点吧！',
+      visitDate: new Date().toISOString().split('T')[0],
+      photos: [],
+    };
+    await savePlace(demoPlace);
+    // 同时设上海市为常住地
+    homeLocation = { name: '上海市', province: '上海市', lat: 31.2304, lng: 121.4737 };
+    await setMeta('home', homeLocation);
+    places = [demoPlace];
+  }
+
   // 初始化地球
   earth = new Earth(document.getElementById('globe-container'));
   earth.onPlaceClick = (id) => showDetail(id);
