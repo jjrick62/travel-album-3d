@@ -1,5 +1,6 @@
 // ===== 主入口 =====
 
+import './logger.js';
 import { initDB, setMeta, getAllPlaces, savePlace, deletePlace, exportAllData, importAllData } from './data.js';
 import { Earth } from './earth.js';
 
@@ -37,13 +38,13 @@ async function init() {
   earth.onPlaceClick = (id) => showDetail(id);
   earth._onDataReady = () => { refreshEarth(); };
 
-  // 手机/平板/桌面三档摄像机初始距离
-  const w = window.innerWidth;
-  if (w <= 480) {
-    earth.camera.position.set(0, 2.8, 6.0);
-  } else if (w <= 768) {
-    earth.camera.position.set(0, 2.0, 5.2);
-  }
+  // 根据屏幕宽高比连续调整初始摄像机高度
+  // 窄屏（手机竖屏）→ 更高更远俯视；宽屏（桌面）→ 更低更近
+  const aspect = window.innerWidth / window.innerHeight;
+  const t = Math.max(0, Math.min(1, (1.6 - aspect) / 1.2));
+  const camY = 1.5 + t * 2.0;
+  const camZ = 3.5 + t * 2.0;
+  earth.camera.position.set(0, camY, camZ);
 
   // 先加载已有地点数据，再启动（地图数据异步加载，不阻塞）
   applyEarthData();
@@ -989,21 +990,29 @@ function bindEvents() {
 
   // 全局点击统一处理
   document.addEventListener('click', (e) => {
+    const hitCard = e.target.closest('.place-card');
+    const hitModal = e.target.closest('.modal');
+    const hitDropdown = e.target.closest('.dropdown') || e.target.closest('#btn-settings');
+    const hitOverview = e.target.closest('.overview-content');
+    const hitDetail = e.target.closest('#detail-card');
+    const hitHeaderBtn = e.target.closest('header button, header input');
+    const isInteractive = hitCard || hitModal || hitDropdown || hitOverview || hitDetail || hitHeaderBtn || e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA';
+
     // 关闭下拉菜单
-    if (!e.target.closest('#btn-settings') && !e.target.closest('#settings-dropdown')) {
+    if (!hitDropdown) {
       dropdown.classList.add('hidden');
       settingsBtn.classList.remove('active');
     }
 
     // 关闭详情卡片
     const card = document.getElementById('detail-card');
-    if (!card.classList.contains('hidden') && e.target.tagName !== 'CANVAS' && !card.contains(e.target) && !e.target.closest('.modal')) {
+    if (!card.classList.contains('hidden') && !hitDetail && !hitModal) {
       card.classList.add('hidden');
       selectedPlaceId = null;
     }
 
-    // 非卡片/非弹窗区域：回退视角
-    if (!e.target.closest('.place-card') && !e.target.closest('.place-card-badge') && !e.target.closest('.modal') && !e.target.closest('.dropdown') && !e.target.closest('.overview-content') && earth._focusedPlaceId) {
+    // 非交互区域：回退视角（聚焦某地点时点击空白即拉回全景）
+    if (!isInteractive && earth._focusedPlaceId) {
       earth.resetView();
     }
   });

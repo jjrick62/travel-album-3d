@@ -13,3 +13,7 @@ data/map/fetch_*.js
 # 旧版地图数据（已迁移到 china_*.geojson）
 data/map/admin1.geojson
 data/map/admin1_world.json
+
+# Python
+__pycache__/
+*.pyc

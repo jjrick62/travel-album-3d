@@ -737,6 +737,11 @@ export class Earth {
         if (this._focusedPlaceId) {
           this._focusedPlaceId = null;
           this.clearHighlight();
+          // 取消飞行动画
+          this._flyStart = null;
+          this._flyOnArrive = null;
+          // target 切回地心，摄像机保持当前高度绕地心旋转
+          this.controls.target.set(0, 0, 0);
           if (this._flySavedRotating !== undefined) {
             this.rotating = this._flySavedRotating;
             this._flySavedRotating = undefined;
