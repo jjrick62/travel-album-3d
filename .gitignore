@@ -14,6 +14,9 @@ data/map/fetch_*.js
 data/map/admin1.geojson
 data/map/admin1_world.json
 
+# Node
+node_modules/
+
 # Python
 __pycache__/
 *.pyc
