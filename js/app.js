@@ -1,7 +1,8 @@
 // ===== 主入口 =====
 
 import './logger.js';
-import { initDB, setMeta, getMeta, getAllPlaces, savePlace, deletePlace, exportAllData, importAllData, login, register, logout, isLoggedIn, uploadPhoto, deletePhoto } from './api.js';
+import { renderStars, calcAvgRating } from './utils.js';
+import { initDB, setMeta, getAllPlaces, savePlace, deletePlace, exportAllData, importAllData, login, register, logout, isLoggedIn, uploadPhoto } from './api.js';
 import { Earth } from './earth.js';
 
 // 触摸设备检测
@@ -18,9 +19,6 @@ let addRating = 0;
 let selectedPlaceId = null;
 let isEditing = false;
 let tempPhotos = [];
-
-// ===== DOM 引用 =====
-const $ = (id) => document.getElementById(id);
 
 // ===== 初始化 =====
 async function init() {
@@ -105,7 +103,7 @@ function updateStats() {
     document.getElementById('stats').textContent = '';
     return;
   }
-  const avg = (places.reduce((s, p) => s + (p.rating || 0), 0) / total).toFixed(1);
+  const avg = calcAvgRating(places);
   document.getElementById('stats').textContent = `${total} 个地点 · ★ ${avg}`;
 }
 
@@ -116,7 +114,7 @@ function createPlaceCard(place) {
   line.dataset.placeId = place.id;
   svg.appendChild(line);
 
-  const stars = '★'.repeat(place.rating || 3) + '☆'.repeat(5 - (place.rating || 3));
+  const stars = renderStars(place.rating);
   const thumb = place.photos && place.photos.length > 0
     ? `<img class="place-card-thumb" src="${place.photos[0].dataUrl}" alt="">` : '';
   const card = document.createElement('div');
@@ -125,7 +123,7 @@ function createPlaceCard(place) {
   card.innerHTML = `<div class="place-card-name">${place.name}</div>
     <div class="place-card-meta">${stars}</div>${thumb}`;
   // 单击/双击逻辑
-  card.addEventListener('click', (e) => {
+  card.addEventListener('click', () => {
     // 折叠代表卡片：先飞过去，再展开
     if (card.classList.contains('place-card-stacked')) {
       const ck = card.dataset.clusterKey;
@@ -325,7 +323,6 @@ function updatePlaceCards() {
         if (bestScore - oldScore < 5000) bestIdx = state._repIdx; // 差距不到半级不换
       }
       state._repIdx = bestIdx;
-      const rep = cardData[bestIdx];
 
       // 计算展开目标：沿各卡片原始方向径向散开
       const spreadR = Math.round(140 * clusterScale);
@@ -1168,9 +1165,7 @@ function renderOverview() {
   const sorted = [...places].sort((a, b) => (b.visitDate || '').localeCompare(a.visitDate || ''));
 
   const total = sorted.length;
-  const avg = total > 0
-    ? (sorted.reduce((s, p) => s + (p.rating || 0), 0) / total).toFixed(1)
-    : '0';
+  const avg = calcAvgRating(sorted);
   document.getElementById('overview-stats').textContent = `${total} 个地点 · ★ ${avg}`;
 
   if (total === 0) {

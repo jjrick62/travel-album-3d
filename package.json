@@ -1,0 +1,15 @@
+{
+  "name": "colorful-meridian",
+  "version": "1.0.0",
+  "description": "Colorful・Meridian — 3D粒子地球旅行相册",
+  "type": "module",
+  "private": true,
+  "scripts": {
+    "dev": "npx http-server . -p 8081 -c-1",
+    "lint": "eslint js/ --fix",
+    "check": "eslint js/ && node --check js/data.js && node --check js/app.js && node --check js/earth.js && node --check js/logger.js"
+  },
+  "devDependencies": {
+    "eslint": "^9.0.0"
+  }
+}
