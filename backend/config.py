@@ -1,6 +1,12 @@
 import os
+import secrets
 
-SECRET_KEY = os.getenv("SECRET_KEY", "dev-secret-change-in-production")
+_SECRET_KEY = os.getenv("SECRET_KEY")
+if not _SECRET_KEY:
+    _SECRET_KEY = secrets.token_urlsafe(32)
+    print(f"[WARN] SECRET_KEY 未设置，已自动生成随机密钥（重启后所有 token 失效）")
+    print(f"       生产环境请设置环境变量 SECRET_KEY 为固定随机字符串")
+SECRET_KEY = _SECRET_KEY
 ALGORITHM = "HS256"
 ACCESS_TOKEN_EXPIRE_MINUTES = 60 * 24 * 7  # 7 天
 

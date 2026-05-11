@@ -20,11 +20,22 @@ async def save_photo(file_data: bytes, original_filename: str, user_id: str, pla
     return f"{user_id}/{place_id}/{filename}"
 
 
+_UPLOAD_DIR_REAL = os.path.realpath(UPLOAD_DIR)
+
+
+def _safe_path(storage_path: str) -> str:
+    """校验并返回安全的绝对路径，路径逃逸则抛出 ValueError"""
+    full = os.path.realpath(os.path.join(UPLOAD_DIR, storage_path))
+    if not full.startswith(_UPLOAD_DIR_REAL + os.sep):
+        raise ValueError("非法的存储路径")
+    return full
+
+
 async def delete_photo(storage_path: str):
-    filepath = os.path.join(UPLOAD_DIR, storage_path)
+    filepath = _safe_path(storage_path)
     if os.path.exists(filepath):
         os.remove(filepath)
 
 
 def get_photo_path(storage_path: str) -> str:
-    return os.path.join(UPLOAD_DIR, storage_path)
+    return _safe_path(storage_path)

@@ -27,7 +27,15 @@ async def upload_photo(
     if not place:
         raise HTTPException(status_code=404, detail="地点不存在")
 
+    MAX_FILE_SIZE = 10 * 1024 * 1024  # 10 MB
+    ALLOWED_TYPES = {"image/jpeg", "image/png", "image/gif", "image/webp"}
+
+    if file.content_type not in ALLOWED_TYPES:
+        raise HTTPException(status_code=400, detail="不支持的文件类型，仅允许 JPEG/PNG/GIF/WebP")
+
     data = await file.read()
+    if len(data) > MAX_FILE_SIZE:
+        raise HTTPException(status_code=400, detail="文件大小超过 10MB 限制")
     storage_path = await save_photo(data, file.filename or "photo.jpg", current_user.id, place_id)
 
     photo = Photo(place_id=place_id, storage_path=storage_path, caption=caption)
