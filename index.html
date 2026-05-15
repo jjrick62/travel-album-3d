@@ -23,6 +23,7 @@
       </button>
       <button id="btn-add" class="btn-add">+</button>
       <button id="btn-settings" class="btn-triangle">&#9660;</button>
+      <button id="btn-account" class="btn-account" title="账号">👤</button>
       <div id="settings-dropdown" class="dropdown hidden">
         <div class="dropdown-section">
           <div class="dropdown-label">常住地</div>
@@ -84,8 +85,18 @@
         <div class="form-group">
           <label for="city-search">地点</label>
           <div class="search-select">
-            <input type="text" id="city-search" placeholder="搜索中国城市..." autocomplete="off">
+            <input type="text" id="city-search" placeholder="搜索城市/地区（支持中英文）..." autocomplete="off">
             <div id="city-search-results" class="search-results"></div>
+          </div>
+        </div>
+        <div class="form-row">
+          <div class="form-group">
+            <label for="input-lat">纬度 Lat</label>
+            <input type="number" id="input-lat" step="any" placeholder="31.2304">
+          </div>
+          <div class="form-group">
+            <label for="input-lng">经度 Lng</label>
+            <input type="number" id="input-lng" step="any" placeholder="121.4737">
           </div>
         </div>
         <div class="form-group">

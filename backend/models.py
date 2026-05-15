@@ -22,6 +22,10 @@ class User(Base):
     id = Column(String, primary_key=True, default=_uuid)
     email = Column(String, unique=True, nullable=False, index=True)
     password_hash = Column(String, nullable=False)
+    failed_login_count = Column(Integer, default=0)
+    locked_until = Column(DateTime, nullable=True)
+    is_verified = Column(Integer, default=0)
+    verification_token = Column(String(64), nullable=True)
     created_at = Column(DateTime, default=_now)
 
     places = relationship("Place", back_populates="user", cascade="all, delete-orphan")

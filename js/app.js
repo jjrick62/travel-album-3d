@@ -19,6 +19,57 @@ let addRating = 0;
 let selectedPlaceId = null;
 let isEditing = false;
 let tempPhotos = [];
+let regionsData = [];
+let worldCitiesData = [];
+let regionsLoaded = false;
+let worldCitiesLoaded = false;
+
+// ===== 国际数据异步加载 =====
+async function ensureRegions() {
+  if (regionsLoaded) return;
+  try {
+    const resp = await fetch('data/regions_world.json');
+    if (resp.ok) {
+      const raw = await resp.json();
+      regionsData = raw.map(r => ({
+        name: r.zh || r.en, nameEn: r.en, province: r.ad || r.cc,
+        lat: r.la, lng: r.lo, level: 'region',
+      }));
+      regionsLoaded = true;
+    }
+  } catch (e) { console.warn('国际地区数据加载失败', e); }
+}
+
+async function ensureWorldCities() {
+  if (worldCitiesLoaded) return;
+  try {
+    const resp = await fetch('data/cities_world.json');
+    if (resp.ok) {
+      const raw = await resp.json();
+      worldCitiesData = raw.map(c => ({
+        name: c.en, nameEn: c.en, province: c.cc,
+        lat: c.la, lng: c.lo, level: 'city', pop: c.pop || 0,
+      }));
+      worldCitiesLoaded = true;
+    }
+  } catch (e) { console.warn('国际城市数据加载失败', e); }
+}
+
+function scoreMatch(item, q) {
+  let score = 0;
+  const name = item.name || '';
+  const nameEn = (item.nameEn || '').toLowerCase();
+  const province = item.province || '';
+  const qLower = q.toLowerCase();
+  if (name === q || nameEn === qLower) { score = 100; }
+  else if (name.startsWith(q) || nameEn.startsWith(qLower)) { score = 80; }
+  else if (name.includes(q) || nameEn.includes(qLower)) { score = 50; }
+  else if (province.includes(q) || province.toLowerCase().includes(qLower)) { score = 20; }
+  else { return 0; }
+  if (item.level === 'city') score += 2;
+  else if (item.level === 'province') score += 1;
+  return score;
+}
 
 // ===== 初始化 =====
 async function init() {
@@ -497,22 +548,27 @@ function createSearch(inputId, resultsId, onSelect) {
     document.body.appendChild(results);
   }
 
+  input.addEventListener('focus', () => { ensureRegions(); });
+
   input.addEventListener('input', () => {
     const q = input.value.trim();
     if (!q) { results.classList.remove('active'); return; }
 
-    // 相关度排序：精准匹配 > 开头匹配 > 包含匹配 > 省份匹配
+    // 输入非中文时，触发国际城市异步加载
+    if (!/[一-鿿]/.test(q)) { ensureWorldCities(); }
+
     const scored = [];
     for (const c of citiesData) {
-      let score = 0;
-      if (c.name === q) { score = 100; }
-      else if (c.name.startsWith(q)) { score = 80; }
-      else if (c.name.includes(q)) { score = 50; }
-      else if (c.province.includes(q)) { score = 20; }
-      else { continue; }
-      if (c.level === 'city') score += 2;
-      else if (c.level === 'province') score += 1;
-      scored.push({ city: c, score });
+      const s = scoreMatch(c, q);
+      if (s > 0) scored.push({ city: c, score: s });
+    }
+    for (const r of regionsData) {
+      const s = scoreMatch(r, q);
+      if (s > 0) scored.push({ city: r, score: s });
+    }
+    for (const w of worldCitiesData) {
+      const s = scoreMatch(w, q);
+      if (s > 0) scored.push({ city: w, score: s });
     }
     scored.sort((a, b) => b.score - a.score);
     const matched = scored.slice(0, 15).map(s => s.city);
@@ -520,7 +576,6 @@ function createSearch(inputId, resultsId, onSelect) {
     results.innerHTML = '';
     if (matched.length === 0) { results.classList.remove('active'); return; }
     results.classList.add('active');
-    // fixed 定位贴到输入框正下方
     const rect = input.getBoundingClientRect();
     results.style.top = (rect.bottom + 4) + 'px';
     results.style.left = rect.left + 'px';
@@ -529,7 +584,11 @@ function createSearch(inputId, resultsId, onSelect) {
     for (const c of matched) {
       const div = document.createElement('div');
       div.className = 'result-item';
-      div.innerHTML = `${c.name}<span class="province">${c.province}</span>`;
+      div.appendChild(document.createTextNode(c.name));
+      const provSpan = document.createElement('span');
+      provSpan.className = 'province';
+      provSpan.textContent = c.province;
+      div.appendChild(provSpan);
       div.addEventListener('click', () => {
         input.value = c.name;
         results.classList.remove('active');
@@ -726,6 +785,8 @@ function openEditModal(place) {
   addRating = place.rating || 0;
   tempPhotos = place.photos ? place.photos.slice() : [];
   document.getElementById('city-search').value = place.name;
+  document.getElementById('input-lat').value = place.lat;
+  document.getElementById('input-lng').value = place.lng;
   document.getElementById('visit-date').value = place.visitDate || '';
   document.getElementById('place-notes').value = place.notes || '';
   updateStarInput(addRating);
@@ -755,6 +816,15 @@ function bindEvents() {
     settingsBtn.classList.toggle('active');
   });
 
+  // 账号按钮
+  document.getElementById('btn-account').addEventListener('click', () => {
+    if (isLoggedIn()) {
+      if (confirm(`确定退出登录？`)) { logout(); location.reload(); }
+    } else {
+      showAuthModal();
+    }
+  });
+
   // 添加地点按钮
   document.getElementById('btn-add').addEventListener('click', () => {
     isEditing = false;
@@ -762,6 +832,8 @@ function bindEvents() {
     addRating = 0;
     tempPhotos = [];
     document.getElementById('city-search').value = '';
+    document.getElementById('input-lat').value = '';
+    document.getElementById('input-lng').value = '';
     document.getElementById('visit-date').value = new Date().toISOString().split('T')[0];
     document.getElementById('place-notes').value = '';
     updateStarInput(0);
@@ -818,13 +890,21 @@ function bindEvents() {
     if (!name) { alert('请输入城市名称'); return; }
     // 确保 selectedCity 有效：下拉选中直接用，否则从数据库智能匹配
     if (!selectedCity || selectedCity.name !== name) {
-      let match = citiesData.find(c => c.name === name);
+      let match = citiesData.find(c => c.name === name)
+        || regionsData.find(r => r.name === name || r.nameEn === name)
+        || worldCitiesData.find(w => w.name === name || w.nameEn === name);
       if (!match) match = citiesData.find(c => c.name.includes(name));
       if (match) {
         selectedCity = match;
         document.getElementById('city-search').value = match.name;
       } else {
-        alert('未找到匹配城市，请从下拉列表中选择'); return;
+        // 降级：手动输入经纬度
+        const lat = parseFloat(document.getElementById('input-lat').value);
+        const lng = parseFloat(document.getElementById('input-lng').value);
+        if (isNaN(lat) || isNaN(lng)) {
+          alert('未匹配到城市，请手动输入经纬度坐标'); return;
+        }
+        selectedCity = { name, province: '', lat, lng };
       }
     }
 

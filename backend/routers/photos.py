@@ -48,11 +48,20 @@ async def upload_photo(
 
 
 @router.get("/file/{storage_path:path}")
-async def serve_photo(storage_path: str):
-    """直接返回照片文件，无需认证（照片 URL 本身就是访问密钥）"""
+async def serve_photo(
+    storage_path: str,
+    current_user: User = Depends(get_current_user),
+):
+    """返回照片文件，需认证且校验所有权"""
     filepath = get_photo_path(storage_path)
     if not os.path.exists(filepath):
         raise HTTPException(status_code=404, detail="照片不存在")
+
+    # 从路径中提取 user_id，校验所有权
+    parts = storage_path.replace("\\", "/").split("/")
+    if len(parts) < 2 or parts[0] != current_user.id:
+        raise HTTPException(status_code=404, detail="照片不存在")
+
     return FileResponse(filepath)
 
 

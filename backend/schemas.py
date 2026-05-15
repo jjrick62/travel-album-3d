@@ -10,7 +10,7 @@ class UserRegister(BaseModel):
 
 
 class UserLogin(BaseModel):
-    email: str
+    email: EmailStr
     password: str
 
 
@@ -44,23 +44,23 @@ class PhotoCreate(BaseModel):
 
 # ===== 地点 =====
 class PlaceCreate(BaseModel):
-    name: str
-    full_name: Optional[str] = None
-    lat: float
-    lng: float
-    rating: int = 3
-    notes: str = ""
-    visit_date: str = ""
+    name: str = Field(min_length=1, max_length=200)
+    full_name: Optional[str] = Field(default=None, max_length=500)
+    lat: float = Field(ge=-90, le=90)
+    lng: float = Field(ge=-180, le=180)
+    rating: int = Field(default=3, ge=1, le=5)
+    notes: str = Field(default="", max_length=5000)
+    visit_date: str = Field(default="", max_length=20)
 
 
 class PlaceUpdate(BaseModel):
-    name: Optional[str] = None
-    full_name: Optional[str] = None
-    lat: Optional[float] = None
-    lng: Optional[float] = None
-    rating: Optional[int] = None
-    notes: Optional[str] = None
-    visit_date: Optional[str] = None
+    name: Optional[str] = Field(default=None, min_length=1, max_length=200)
+    full_name: Optional[str] = Field(default=None, max_length=500)
+    lat: Optional[float] = Field(default=None, ge=-90, le=90)
+    lng: Optional[float] = Field(default=None, ge=-180, le=180)
+    rating: Optional[int] = Field(default=None, ge=1, le=5)
+    notes: Optional[str] = Field(default=None, max_length=5000)
+    visit_date: Optional[str] = Field(default=None, max_length=20)
 
 
 class PlaceOut(BaseModel):

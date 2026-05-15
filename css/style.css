@@ -96,6 +96,13 @@ canvas {
 
 .btn-add:hover { border-color: #888; }
 
+.btn-account {
+  background: none; border: 1px solid #444; color: #fff;
+  width: 2rem; height: 2rem; border-radius: 0.375rem;
+  cursor: pointer; font-size: 0.875rem; line-height: 1;
+}
+.btn-account:hover { border-color: #888; }
+
 .btn-triangle {
   background: none;
   border: 1px solid #444;
@@ -355,6 +362,8 @@ canvas {
 
 /* ===== 表单 ===== */
 .form-group { margin-bottom: 0.875rem; }
+.form-row { display: flex; gap: 0.75rem; }
+.form-row .form-group { flex: 1; }
 
 .form-group label {
   display: block;
@@ -365,6 +374,7 @@ canvas {
 
 .form-group input[type="text"],
 .form-group input[type="date"],
+.form-group input[type="number"],
 .form-group textarea {
   width: 100%;
   background: #000;
